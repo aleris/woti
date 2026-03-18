@@ -40,7 +40,7 @@ impl App {
     }
 
     fn render_header(&self, frame: &mut Frame, area: Rect) {
-        let icon = Span::styled(" ⏲ ", Style::default().fg(theme::HEADER_ICON));
+        let icon = Span::styled(" 🕜 ", Style::default().fg(theme::HEADER_ICON));
         let title = Span::styled("woti", Style::default().fg(theme::HEADER_TITLE).bold());
 
         let line = Line::from(vec![icon, title]);
