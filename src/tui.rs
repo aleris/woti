@@ -280,7 +280,11 @@ impl App {
         let base_hour = current_hour + self.hour_offset;
         let start_hour = base_hour - num_cells / 2;
 
-        let mut day_spans: Vec<Span> = Vec::new();
+        let cell_w = CELL_WIDTH as usize;
+        let total_day_chars = (num_cells as usize) * cell_w;
+        let mut day_chars: Vec<char> = vec![' '; total_day_chars];
+        let mut day_is_label: Vec<bool> = vec![false; total_day_chars];
+
         let mut hour_spans: Vec<Span> = Vec::new();
         let mut ampm_spans: Vec<Span> = Vec::new();
 
@@ -304,23 +308,19 @@ impl App {
             };
 
             if hour_in_day == 0 {
-                let day_label = dt.format("%a").to_string().to_uppercase();
-                let padded = format!("{:<width$}", day_label, width = CELL_WIDTH as usize);
-                day_spans.push(Span::styled(
-                    padded,
-                    if is_selected {
-                        cell_style
-                    } else if is_local {
-                        cell_style.fg(Color::Magenta).bold()
-                    } else {
-                        Style::default().fg(Color::Magenta).bold()
-                    },
-                ));
-            } else {
-                day_spans.push(Span::styled(
-                    " ".repeat(CELL_WIDTH as usize),
-                    cell_style,
-                ));
+                let day_label = format!(
+                    "{} {}",
+                    dt.format("%a").to_string().to_uppercase(),
+                    dt.format("%-d")
+                );
+                let start_pos = (i as usize) * cell_w;
+                for (j, ch) in day_label.chars().enumerate() {
+                    let pos = start_pos + j;
+                    if pos < total_day_chars {
+                        day_chars[pos] = ch;
+                        day_is_label[pos] = true;
+                    }
+                }
             }
 
             let display_hour = if self.use_24h {
@@ -329,7 +329,7 @@ impl App {
                 let h12 = hour_in_day % 12;
                 if h12 == 0 { 12 } else { h12 }
             };
-            let h_str = format!("{:<width$}", display_hour, width = CELL_WIDTH as usize);
+            let h_str = format!("{:<width$}", display_hour, width = cell_w);
             hour_spans.push(Span::styled(
                 h_str,
                 if is_selected {
@@ -343,7 +343,7 @@ impl App {
 
             if !self.use_24h {
                 let ampm = if hour_in_day < 12 { "am" } else { "pm" };
-                let ampm_str = format!("{:<width$}", ampm, width = CELL_WIDTH as usize);
+                let ampm_str = format!("{:<width$}", ampm, width = cell_w);
                 ampm_spans.push(Span::styled(
                     ampm_str,
                     if is_selected {
@@ -358,6 +358,49 @@ impl App {
                 ));
             }
         }
+
+        let day_spans: Vec<Span> = {
+            let style_for = |pos: usize| -> Style {
+                let cell_idx = pos / cell_w;
+                let h = start_hour + cell_idx as i32;
+                let is_sel = h == base_hour;
+                let is_loc = h == current_hour && self.hour_offset != 0;
+                let is_lab = day_is_label[pos];
+                if is_sel {
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Yellow)
+                        .bold()
+                } else if is_loc {
+                    if is_lab {
+                        Style::default()
+                            .bg(Color::Rgb(50, 50, 50))
+                            .fg(Color::Magenta)
+                            .bold()
+                    } else {
+                        Style::default().bg(Color::Rgb(50, 50, 50))
+                    }
+                } else if is_lab {
+                    Style::default().fg(Color::Magenta).bold()
+                } else {
+                    Style::default()
+                }
+            };
+
+            let mut spans = Vec::new();
+            let mut pos = 0;
+            while pos < total_day_chars {
+                let style = style_for(pos);
+                let mut end = pos + 1;
+                while end < total_day_chars && style_for(end) == style {
+                    end += 1;
+                }
+                let text: String = day_chars[pos..end].iter().collect();
+                spans.push(Span::styled(text, style));
+                pos = end;
+            }
+            spans
+        };
 
         // Row 1: blank info area + day markers
         let mut line1 = vec![Span::raw(" ".repeat(left_pad))];
