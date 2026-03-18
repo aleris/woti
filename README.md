@@ -2,6 +2,22 @@
 
 World time in your terminal — see current times across time zones at a glance.
 
+## Install
+
+```
+curl -fsSL https://raw.githubusercontent.com/aleris/woti/main/scripts/install.sh | sh
+```
+
+To install a specific version:
+
+```
+curl -fsSL https://raw.githubusercontent.com/aleris/woti/main/scripts/install.sh | sh -s -- --version v0.3.0
+```
+
+Supported platforms: macOS (Apple Silicon, Intel) and Linux (x86_64, aarch64).
+
+The binary is installed to `~/.local/bin` (or `/usr/local/bin` when run as root).
+
 ## Usage
 
 ```
@@ -27,10 +43,21 @@ Local and UTC are preconfigured by default. Configuration is stored in `~/.confi
 
 Requires Rust 2024 edition (1.85+).
 
-```
+Before committing, run dev setup to install the git hook to increment version. 
+```sh
 make setup-dev
+```
 
+
+Build, test, run:
+```sh
 cargo build
-cargo run
 cargo test
+cargo run
+cargo run -- --version
+```
+
+Release, pushes current version tag which triggers workflow on GitHub:
+```sh
+make release
 ```
