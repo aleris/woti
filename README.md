@@ -2,6 +2,8 @@
 
 World time in your terminal — see current times across time zones at a glance.
 
+![screenshot.png](screenshot.png)
+
 ## Install
 
 ```
@@ -36,7 +38,7 @@ Local and UTC are preconfigured by default. Configuration is stored in `~/.confi
 - `←` / `→`: scroll the timeline by hour
 - `↑` / `↓`: scroll timezone list
 - `c`: copy current selection to clipboard
-- `f`: cycle time format (24h → am/pm → mixed → …)
+- `f`: cycle time format (mixed -> am/pm -> 24h → …)
 - `q` / `x` / `Esc`: exit
 
 ## Development
