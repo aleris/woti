@@ -38,13 +38,7 @@ pub struct App {
 impl App {
     pub fn new(config: AppConfig) -> Self {
         let system_use_24h = detect_use_24h();
-        let time_format = config.time_format.unwrap_or_else(|| {
-            if system_use_24h {
-                TimeFormat::H24
-            } else {
-                TimeFormat::AmPm
-            }
-        });
+        let time_format = config.time_format.unwrap_or(TimeFormat::Mixed);
         Self {
             config,
             hour_offset: 0,
@@ -273,15 +267,15 @@ impl App {
             .fg(Color::Cyan)
             .bg(Color::Rgb(60, 60, 60))
             .bold();
-        let dim = Style::default().fg(Color::DarkGray);
+        let dim = Style::default().fg(Color::Gray);
         let sep = Style::default().fg(Color::Rgb(80, 80, 80));
 
         let fmt_switcher: Vec<Span> = vec![
             Span::styled(" f ", key_on),
             Span::raw(" "),
             Span::styled(
-                " 24 ",
-                if self.time_format == TimeFormat::H24 { sel } else { dim },
+                " mx ",
+                if self.time_format == TimeFormat::Mixed { sel } else { dim },
             ),
             Span::styled("│", sep),
             Span::styled(
@@ -290,8 +284,8 @@ impl App {
             ),
             Span::styled("│", sep),
             Span::styled(
-                " mx ",
-                if self.time_format == TimeFormat::Mixed { sel } else { dim },
+                " 24 ",
+                if self.time_format == TimeFormat::H24 { sel } else { dim },
             ),
             Span::raw(" "),
         ];
@@ -330,9 +324,9 @@ impl App {
 
     fn cycle_time_format(&mut self) {
         self.time_format = match self.time_format {
-            TimeFormat::H24 => TimeFormat::AmPm,
-            TimeFormat::AmPm => TimeFormat::Mixed,
-            TimeFormat::Mixed => TimeFormat::H24,
+            TimeFormat::Mixed => TimeFormat::AmPm,
+            TimeFormat::AmPm => TimeFormat::H24,
+            TimeFormat::H24 => TimeFormat::Mixed,
         };
         self.config.time_format = Some(self.time_format);
         let _ = self.config.save();
@@ -474,15 +468,16 @@ impl App {
                 }
             }
 
-            let h_str = if use_24h {
-                format!("{:>width$}", hour_in_day, width = cell_w)
+            let h_num = if use_24h {
+                format!("{:>2}", hour_in_day)
             } else {
                 let h12 = hour_in_day % 12;
                 let h12 = if h12 == 0 { 12 } else { h12 };
-                format!("{:>width$}", h12, width = cell_w)
+                format!("{:>2}", h12)
             };
+            hour_spans.push(Span::raw(" "));
             hour_spans.push(Span::styled(
-                h_str,
+                h_num,
                 if is_selected {
                     cell_style
                 } else if is_local {
@@ -495,7 +490,7 @@ impl App {
             let (row2_text, row2_style) = if !use_24h {
                 let ampm = if hour_in_day < 12 { "am" } else { "pm" };
                 (
-                    format!("{:>width$}", ampm, width = cell_w),
+                    ampm.to_string(),
                     if is_selected {
                         cell_style
                     } else if is_local {
@@ -507,24 +502,27 @@ impl App {
                     },
                 )
             } else {
-                (" ".repeat(cell_w), cell_style)
+                ("  ".to_string(), cell_style)
             };
+            ampm_spans.push(Span::raw(" "));
             ampm_spans.push(Span::styled(row2_text, row2_style));
         }
 
         let day_spans: Vec<Span> = {
             let style_for = |pos: usize| -> Style {
                 let cell_idx = pos / cell_w;
+                let pos_in_cell = pos % cell_w;
                 let h = start_hour + cell_idx as i32;
                 let is_sel = h == base_hour;
                 let is_loc = h == current_hour && self.hour_offset != 0;
                 let is_lab = day_is_label[pos];
-                if is_sel {
+                let has_bg = pos_in_cell > 0;
+                if is_sel && has_bg {
                     Style::default()
                         .fg(Color::Black)
                         .bg(Color::Yellow)
                         .bold()
-                } else if is_loc {
+                } else if is_loc && has_bg {
                     if is_lab {
                         Style::default()
                             .bg(Color::Rgb(50, 50, 50))
