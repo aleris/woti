@@ -3,7 +3,7 @@ use std::time::Duration;
 use chrono::{Local, Offset, Timelike, Utc};
 use chrono_tz::Tz;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style, Stylize};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Padding, Paragraph};
 use ratatui::Frame;
@@ -213,6 +213,9 @@ impl App {
         let start_hour = base_hour - num_cells / 2;
         let cell_w = CELL_WIDTH as usize;
 
+        let utc_secs = now_tz.offset().fix().local_minus_utc();
+        let offset_m = (utc_secs.abs() % 3600) / 60;
+
         let tl = TimelineParams {
             start_hour,
             base_hour,
@@ -221,6 +224,7 @@ impl App {
             num_cells,
             cell_w,
             use_24h,
+            offset_m,
             tz,
             now_tz,
         };
@@ -258,6 +262,7 @@ struct TimelineParams {
     num_cells: i32,
     cell_w: usize,
     use_24h: bool,
+    offset_m: i32,
     tz: Tz,
     now_tz: chrono::DateTime<Tz>,
 }
@@ -303,6 +308,22 @@ fn build_hour_spans(p: &TimelineParams) -> Vec<Span<'static>> {
     spans
 }
 
+fn minutes_superscript(m: i32) -> &'static str {
+    match m {
+        30 => "³⁰",
+        45 => "⁴⁵",
+        _ => "  ",
+    }
+}
+
+fn minutes_fraction(m: i32) -> &'static str {
+    match m {
+        30 => "½",
+        45 => "¾",
+        _ => "",
+    }
+}
+
 fn build_ampm_spans(p: &TimelineParams) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     for i in 0..p.num_cells {
@@ -312,7 +333,6 @@ fn build_ampm_spans(p: &TimelineParams) -> Vec<Span<'static>> {
         let is_local = h == p.current_hour && p.hour_offset != 0;
 
         let (text, style) = if !p.use_24h {
-            let ampm = if hour_in_day < 12 { "am" } else { "pm" };
             let style = if is_selected {
                 selected_style()
             } else if is_local {
@@ -322,7 +342,16 @@ fn build_ampm_spans(p: &TimelineParams) -> Vec<Span<'static>> {
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::DIM)
             };
-            (ampm.to_string(), style)
+
+            let text = if p.offset_m != 0 {
+                let frac = minutes_fraction(p.offset_m);
+                let meridiem = if hour_in_day < 12 { "a" } else { "p" };
+                format!("{frac}{meridiem}")
+            } else {
+                let ampm = if hour_in_day < 12 { "am" } else { "pm" };
+                ampm.to_string()
+            };
+            (text, style)
         } else {
             let style = if is_selected {
                 selected_style()
@@ -331,7 +360,13 @@ fn build_ampm_spans(p: &TimelineParams) -> Vec<Span<'static>> {
             } else {
                 Style::default()
             };
-            ("  ".to_string(), style)
+
+            let text = if p.offset_m != 0 {
+                minutes_superscript(p.offset_m).to_string()
+            } else {
+                "  ".to_string()
+            };
+            (text, style)
         };
 
         spans.push(Span::raw(" "));
