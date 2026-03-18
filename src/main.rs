@@ -14,7 +14,13 @@ fn main() {
 
     match cli.command {
         Some(Command::Add { zone }) => cmd_add(&zone.join(" ")),
-        Some(Command::Remove { zone }) => cmd_remove(&zone.join(" ")),
+        Some(Command::Remove { zone, reset }) => {
+            if reset {
+                cmd_reset();
+            } else {
+                cmd_remove(&zone.join(" "));
+            }
+        }
         None => cmd_tui(),
     }
 }
@@ -89,6 +95,22 @@ fn cmd_remove(input: &str) {
             std::process::exit(1);
         }
     }
+}
+
+fn cmd_reset() {
+    let mut config = AppConfig::load();
+    let removed = config.reset();
+
+    if removed == 0 {
+        println!("No custom timezones to remove. Config already at defaults.");
+        return;
+    }
+
+    if let Err(e) = config.save() {
+        eprintln!("Error saving config: {e}");
+        std::process::exit(1);
+    }
+    println!("Reset: removed {removed} custom timezone(s). Defaults restored (Local + UTC).");
 }
 
 fn cmd_tui() {

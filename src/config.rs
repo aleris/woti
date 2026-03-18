@@ -108,6 +108,12 @@ impl AppConfig {
         self.timezones.push(entry);
     }
 
+    pub fn reset(&mut self) -> usize {
+        let removed = self.timezones.iter().filter(|e| !e.is_default).count();
+        self.timezones.retain(|e| e.is_default);
+        removed
+    }
+
     pub fn remove_by_iana(&mut self, iana_id: &str) -> Option<TimezoneEntry> {
         if let Some(pos) = self.timezones.iter().position(|e| e.iana_id == iana_id) {
             Some(self.timezones.remove(pos))
@@ -196,6 +202,36 @@ mod tests {
         assert_eq!(config.timezones.len(), 2);
         assert!(config.has_iana("UTC"));
         assert!(config.has_iana("America/Los_Angeles"));
+    }
+
+    // --- Spec: "Reset to defaults" ---
+
+    #[test]
+    fn reset_removes_custom_timezones() {
+        let mut config = AppConfig { timezones: vec![] };
+        config.add(make_entry("UTC", "UTC", true));
+        config.add(make_entry("Europe/Bucharest", "Bucharest", true));
+        config.add(make_entry("America/Los_Angeles", "Los Angeles", false));
+        config.add(make_entry("Asia/Tokyo", "Tokyo", false));
+        config.add(make_entry("Europe/Berlin", "Berlin", false));
+
+        let removed = config.reset();
+        assert_eq!(removed, 3);
+        assert_eq!(config.timezones.len(), 2);
+        assert!(config.has_iana("UTC"));
+        assert!(config.has_iana("Europe/Bucharest"));
+        assert!(!config.has_iana("America/Los_Angeles"));
+    }
+
+    #[test]
+    fn reset_with_only_defaults_returns_zero() {
+        let mut config = AppConfig { timezones: vec![] };
+        config.add(make_entry("UTC", "UTC", true));
+        config.add(make_entry("Europe/Bucharest", "Bucharest", true));
+
+        let removed = config.reset();
+        assert_eq!(removed, 0);
+        assert_eq!(config.timezones.len(), 2);
     }
 
     // --- Config serialization round-trip ---

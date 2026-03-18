@@ -42,10 +42,16 @@ pub enum Command {
         after_help = "\x1b[1mExamples:\x1b[0m\n  \
             woti remove PST\n  \
             woti remove Bucharest\n  \
-            woti remove America/New_York"
+            woti remove America/New_York\n  \
+            woti remove --reset           Remove all custom timezones"
     )]
     Remove {
+        /// Remove all custom timezones and restore defaults (Local + UTC)
+        #[arg(long, conflicts_with = "zone")]
+        reset: bool,
+
         /// Timezone abbreviation, city name, or IANA identifier
+        #[arg(required_unless_present = "reset")]
         zone: Vec<String>,
     },
 }
