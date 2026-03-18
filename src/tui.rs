@@ -1,7 +1,7 @@
 use std::io::{self, Stdout};
 use std::time::{Duration, Instant};
 
-use chrono::{Local, Offset, Timelike, Utc};
+use chrono::{Datelike, Local, Offset, Timelike, Utc};
 use chrono_tz::Tz;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{
@@ -16,7 +16,8 @@ use ratatui::widgets::{Block, Padding, Paragraph};
 use ratatui::Frame;
 use ratatui::Terminal;
 
-use crate::config::AppConfig;
+use crate::config::{AppConfig, TimeFormat};
+use crate::tz_data;
 
 const CELL_WIDTH: u16 = 3;
 const INFO_COL_WIDTH: u16 = 40;
@@ -28,24 +29,52 @@ pub struct App {
     config: AppConfig,
     hour_offset: i32,
     scroll_offset: usize,
-    use_24h: bool,
+    time_format: TimeFormat,
+    system_use_24h: bool,
     should_quit: bool,
+    copied_at: Option<Instant>,
 }
 
 impl App {
     pub fn new(config: AppConfig) -> Self {
+        let system_use_24h = detect_use_24h();
+        let time_format = config.time_format.unwrap_or_else(|| {
+            if system_use_24h {
+                TimeFormat::H24
+            } else {
+                TimeFormat::AmPm
+            }
+        });
         Self {
             config,
             hour_offset: 0,
             scroll_offset: 0,
-            use_24h: detect_use_24h(),
+            time_format,
+            system_use_24h,
             should_quit: false,
+            copied_at: None,
         }
     }
 
     fn max_scroll(&self, body_height: u16) -> usize {
         let visible = (body_height / BLOCK_HEIGHT) as usize;
         self.config.timezones.len().saturating_sub(visible)
+    }
+
+    fn use_24h_for_header(&self) -> bool {
+        match self.time_format {
+            TimeFormat::H24 => true,
+            TimeFormat::AmPm => false,
+            TimeFormat::Mixed => self.system_use_24h,
+        }
+    }
+
+    fn use_24h_for_tz(&self, iana_id: &str) -> bool {
+        match self.time_format {
+            TimeFormat::H24 => true,
+            TimeFormat::AmPm => false,
+            TimeFormat::Mixed => !tz_data::uses_12h_clock(iana_id),
+        }
     }
 
     pub fn run(&mut self) -> io::Result<()> {
@@ -114,6 +143,16 @@ impl App {
                                     last_render = Instant::now();
                                 }
                             }
+                            (KeyCode::Char('c'), KeyModifiers::NONE) => {
+                                self.copy_selection();
+                                terminal.draw(|f| self.render(f))?;
+                                last_render = Instant::now();
+                            }
+                            (KeyCode::Char('f'), KeyModifiers::NONE) => {
+                                self.cycle_time_format();
+                                terminal.draw(|f| self.render(f))?;
+                                last_render = Instant::now();
+                            }
                             _ => {}
                         }
                     }
@@ -169,7 +208,7 @@ impl App {
 
     fn render_header(&self, frame: &mut Frame, area: Rect) {
         let now = Local::now();
-        let time_str = if self.use_24h {
+        let time_str = if self.use_24h_for_header() {
             now.format("%H:%M:%S").to_string()
         } else {
             now.format("%-I:%M:%S %p").to_string()
@@ -193,6 +232,17 @@ impl App {
     }
 
     fn render_footer(&self, frame: &mut Frame, area: Rect, body_height: u16) {
+        if let Some(t) = self.copied_at {
+            if t.elapsed() < Duration::from_secs(2) {
+                let line = Line::from(vec![
+                    Span::styled(" Copied! ", Style::default().fg(Color::Green).bold()),
+                ]);
+                let p = Paragraph::new(line).style(Style::default().bg(Color::DarkGray));
+                frame.render_widget(p, area);
+                return;
+            }
+        }
+
         let max = self.max_scroll(body_height);
         let can_up = self.scroll_offset > 0;
         let can_down = self.scroll_offset < max;
@@ -213,11 +263,48 @@ impl App {
             Span::styled(" Prev Hour ", label_on),
             Span::styled(" → ", key_on),
             Span::styled(" Next Hour ", label_on),
+            Span::styled(" c ", key_on),
+            Span::styled(" Copy ", label_on),
             Span::styled(" q ", key_on),
             Span::styled(" Quit ", label_on),
         ];
 
-        let line = Line::from(shortcuts);
+        let sel = Style::default()
+            .fg(Color::Cyan)
+            .bg(Color::Rgb(60, 60, 60))
+            .bold();
+        let dim = Style::default().fg(Color::DarkGray);
+        let sep = Style::default().fg(Color::Rgb(80, 80, 80));
+
+        let fmt_switcher: Vec<Span> = vec![
+            Span::styled(" f ", key_on),
+            Span::raw(" "),
+            Span::styled(
+                " 24 ",
+                if self.time_format == TimeFormat::H24 { sel } else { dim },
+            ),
+            Span::styled("│", sep),
+            Span::styled(
+                " am ",
+                if self.time_format == TimeFormat::AmPm { sel } else { dim },
+            ),
+            Span::styled("│", sep),
+            Span::styled(
+                " mx ",
+                if self.time_format == TimeFormat::Mixed { sel } else { dim },
+            ),
+            Span::raw(" "),
+        ];
+
+        let left_w: usize = shortcuts.iter().map(|s| s.width()).sum();
+        let right_w: usize = fmt_switcher.iter().map(|s| s.width()).sum();
+        let spacer = (area.width as usize).saturating_sub(left_w + right_w);
+
+        let mut spans = shortcuts;
+        spans.push(Span::raw(" ".repeat(spacer)));
+        spans.extend(fmt_switcher);
+
+        let line = Line::from(spans);
         let p = Paragraph::new(line).style(Style::default().bg(Color::DarkGray));
         frame.render_widget(p, area);
     }
@@ -241,6 +328,69 @@ impl App {
         }
     }
 
+    fn cycle_time_format(&mut self) {
+        self.time_format = match self.time_format {
+            TimeFormat::H24 => TimeFormat::AmPm,
+            TimeFormat::AmPm => TimeFormat::Mixed,
+            TimeFormat::Mixed => TimeFormat::H24,
+        };
+        self.config.time_format = Some(self.time_format);
+        let _ = self.config.save();
+    }
+
+    fn copy_selection(&mut self) {
+        let text = self.build_copy_text();
+        match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(text)) {
+            Ok(_) => self.copied_at = Some(Instant::now()),
+            Err(_) => {}
+        }
+    }
+
+    fn build_copy_text(&self) -> String {
+        let now_utc = Utc::now();
+        let mut lines = Vec::new();
+        let mut ref_date = None;
+
+        for entry in &self.config.timezones {
+            let tz: Tz = entry.iana_id.parse().unwrap_or(chrono_tz::UTC);
+            let now_tz = now_utc.with_timezone(&tz);
+            let selected_dt = compute_datetime_for_hour(tz, now_tz, self.hour_offset);
+
+            let tz_abbr = selected_dt.format("%Z").to_string();
+            let hour_in_day = selected_dt.hour();
+
+            let use_24h = self.use_24h_for_tz(&entry.iana_id);
+            let time_str = if use_24h {
+                format!("{:02}:00", hour_in_day)
+            } else {
+                let h12 = hour_in_day % 12;
+                let h12 = if h12 == 0 { 12 } else { h12 };
+                let ampm = if hour_in_day < 12 { "am" } else { "pm" };
+                format!("{}{}", h12, ampm)
+            };
+
+            let date = selected_dt.date_naive();
+            let day_suffix = match ref_date {
+                None => {
+                    ref_date = Some(date);
+                    String::new()
+                }
+                Some(ref_d) if date != ref_d => {
+                    format!(
+                        " {} {}",
+                        selected_dt.format("%a").to_string().to_uppercase(),
+                        selected_dt.day()
+                    )
+                }
+                _ => String::new(),
+            };
+
+            lines.push(format!("{} / {} {}{}", entry.city, tz_abbr, time_str, day_suffix));
+        }
+
+        lines.join("\n")
+    }
+
     fn render_timezone_block(
         &self,
         frame: &mut Frame,
@@ -253,8 +403,9 @@ impl App {
         let now_tz = now_utc.with_timezone(&tz);
         let current_hour = now_tz.hour() as i32;
 
+        let use_24h = self.use_24h_for_tz(&entry.iana_id);
         let tz_abbr = now_tz.format("%Z").to_string();
-        let time_str = if self.use_24h {
+        let time_str = if use_24h {
             now_tz.format("%H:%M").to_string()
         } else {
             now_tz.format("%-I:%M %p").to_string()
@@ -323,13 +474,13 @@ impl App {
                 }
             }
 
-            let display_hour = if self.use_24h {
-                hour_in_day
+            let h_str = if use_24h {
+                format!("{:>width$}", hour_in_day, width = cell_w)
             } else {
                 let h12 = hour_in_day % 12;
-                if h12 == 0 { 12 } else { h12 }
+                let h12 = if h12 == 0 { 12 } else { h12 };
+                format!("{:>width$}", h12, width = cell_w)
             };
-            let h_str = format!("{:<width$}", display_hour, width = cell_w);
             hour_spans.push(Span::styled(
                 h_str,
                 if is_selected {
@@ -341,11 +492,10 @@ impl App {
                 },
             ));
 
-            if !self.use_24h {
+            let (row2_text, row2_style) = if !use_24h {
                 let ampm = if hour_in_day < 12 { "am" } else { "pm" };
-                let ampm_str = format!("{:<width$}", ampm, width = cell_w);
-                ampm_spans.push(Span::styled(
-                    ampm_str,
+                (
+                    format!("{:>width$}", ampm, width = cell_w),
                     if is_selected {
                         cell_style
                     } else if is_local {
@@ -355,8 +505,11 @@ impl App {
                             .fg(Color::DarkGray)
                             .add_modifier(Modifier::DIM)
                     },
-                ));
-            }
+                )
+            } else {
+                (" ".repeat(cell_w), cell_style)
+            };
+            ampm_spans.push(Span::styled(row2_text, row2_style));
         }
 
         let day_spans: Vec<Span> = {
@@ -441,9 +594,7 @@ impl App {
             Span::styled(date_str, Style::default().fg(Color::DarkGray)),
             Span::raw(" ".repeat(TIMELINE_GAP as usize)),
         ];
-        if !self.use_24h {
-            line3.extend(ampm_spans);
-        }
+        line3.extend(ampm_spans);
         frame.render_widget(Paragraph::new(Line::from(line3)), rows[2]);
     }
 }

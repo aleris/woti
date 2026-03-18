@@ -358,6 +358,39 @@ fn iana_city_name(iana_id: &str) -> String {
         .replace('_', " ")
 }
 
+const TWELVE_HOUR_REGIONS: &[&str] = &[
+    "United States",
+    "Canada",
+    "United Kingdom",
+    "Ireland",
+    "Australia",
+    "New Zealand",
+    "India",
+    "Pakistan",
+    "Bangladesh",
+    "Sri Lanka",
+    "Nepal",
+    "Philippines",
+    "Malaysia",
+    "Colombia",
+    "Mexico",
+    "Egypt",
+    "Saudi Arabia",
+];
+
+pub fn uses_12h_clock(iana_id: &str) -> bool {
+    if let Some(region) = REGION_NAMES.iter().find(|(id, _)| *id == iana_id).map(|(_, r)| *r) {
+        return TWELVE_HOUR_REGIONS
+            .iter()
+            .any(|&prefix| region.starts_with(prefix));
+    }
+
+    iana_id.starts_with("America/Indiana/")
+        || iana_id.starts_with("America/Kentucky/")
+        || iana_id.starts_with("America/North_Dakota/")
+        || iana_id.starts_with("Australia/")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

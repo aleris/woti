@@ -6,6 +6,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::tz_data;
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum TimeFormat {
+    #[serde(rename = "24h")]
+    H24,
+    #[serde(rename = "ampm")]
+    AmPm,
+    #[serde(rename = "mixed")]
+    Mixed,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TimezoneEntry {
     pub iana_id: String,
@@ -18,6 +28,8 @@ pub struct TimezoneEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub timezones: Vec<TimezoneEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_format: Option<TimeFormat>,
 }
 
 impl Default for AppConfig {
@@ -41,7 +53,10 @@ impl Default for AppConfig {
             });
         }
 
-        Self { timezones }
+        Self {
+            timezones,
+            time_format: None,
+        }
     }
 }
 
@@ -163,14 +178,14 @@ mod tests {
 
     #[test]
     fn has_iana_detects_existing() {
-        let mut config = AppConfig { timezones: vec![] };
+        let mut config = AppConfig { timezones: vec![], time_format: None };
         config.add(make_entry("America/Los_Angeles", "Los Angeles", false));
         assert!(config.has_iana("America/Los_Angeles"));
     }
 
     #[test]
     fn has_iana_returns_false_for_missing() {
-        let config = AppConfig { timezones: vec![] };
+        let config = AppConfig { timezones: vec![], time_format: None };
         assert!(!config.has_iana("America/Los_Angeles"));
     }
 
@@ -178,7 +193,7 @@ mod tests {
 
     #[test]
     fn remove_existing_entry() {
-        let mut config = AppConfig { timezones: vec![] };
+        let mut config = AppConfig { timezones: vec![], time_format: None };
         config.add(make_entry("Asia/Tokyo", "Tokyo", false));
         let removed = config.remove_by_iana("Asia/Tokyo");
         assert!(removed.is_some());
@@ -188,7 +203,7 @@ mod tests {
 
     #[test]
     fn remove_nonexistent_returns_none() {
-        let mut config = AppConfig { timezones: vec![] };
+        let mut config = AppConfig { timezones: vec![], time_format: None };
         assert!(config.remove_by_iana("Asia/Tokyo").is_none());
     }
 
@@ -196,7 +211,7 @@ mod tests {
 
     #[test]
     fn add_preserves_existing_entries() {
-        let mut config = AppConfig { timezones: vec![] };
+        let mut config = AppConfig { timezones: vec![], time_format: None };
         config.add(make_entry("UTC", "UTC", true));
         config.add(make_entry("America/Los_Angeles", "Los Angeles", false));
         assert_eq!(config.timezones.len(), 2);
@@ -208,7 +223,7 @@ mod tests {
 
     #[test]
     fn reset_removes_custom_timezones() {
-        let mut config = AppConfig { timezones: vec![] };
+        let mut config = AppConfig { timezones: vec![], time_format: None };
         config.add(make_entry("UTC", "UTC", true));
         config.add(make_entry("Europe/Bucharest", "Bucharest", true));
         config.add(make_entry("America/Los_Angeles", "Los Angeles", false));
@@ -225,7 +240,7 @@ mod tests {
 
     #[test]
     fn reset_with_only_defaults_returns_zero() {
-        let mut config = AppConfig { timezones: vec![] };
+        let mut config = AppConfig { timezones: vec![], time_format: None };
         config.add(make_entry("UTC", "UTC", true));
         config.add(make_entry("Europe/Bucharest", "Bucharest", true));
 
@@ -243,6 +258,7 @@ mod tests {
                 make_entry("UTC", "UTC", true),
                 make_entry("America/New_York", "New York", false),
             ],
+            time_format: None,
         };
         let toml_str = toml::to_string_pretty(&config).expect("serialize");
         let loaded: AppConfig = toml::from_str(&toml_str).expect("deserialize");

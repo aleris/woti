@@ -17,8 +17,11 @@ Local and UTC are preconfigured by default. Configuration is stored in `~/.confi
 
 ### TUI controls
 
-- Left/Right arrows: scroll the timeline
-- `x` or `q`: exit
+- `←` / `→`: scroll the timeline by hour
+- `↑` / `↓`: scroll timezone list
+- `c`: copy current selection to clipboard
+- `f`: cycle time format (24h → am/pm → mixed → …)
+- `q` / `x` / `Esc`: exit
 
 ## Development
 
