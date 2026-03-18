@@ -2,6 +2,7 @@ mod app;
 mod copy;
 mod event;
 mod render;
+mod theme;
 mod time_format;
 
 pub use app::App;

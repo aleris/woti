@@ -86,7 +86,6 @@ mod tests {
             hour_offset: 0,
             scroll_offset: 0,
             time_format: format,
-            system_use_24h: false,
             should_quit: false,
             copied_at: None,
         }

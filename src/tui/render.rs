@@ -1,9 +1,9 @@
 use std::time::Duration;
 
-use chrono::{Local, Offset, Timelike, Utc};
+use chrono::{Offset, Timelike, Utc};
 use chrono_tz::Tz;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Padding, Paragraph};
 use ratatui::Frame;
@@ -11,6 +11,7 @@ use ratatui::Frame;
 use crate::config::TimeFormat;
 
 use super::app::App;
+use super::theme;
 use super::{BLOCK_HEIGHT, CELL_WIDTH, INFO_COL_WIDTH, TIMELINE_GAP};
 
 pub(super) fn compute_datetime_for_hour(
@@ -39,38 +40,23 @@ impl App {
     }
 
     fn render_header(&self, frame: &mut Frame, area: Rect) {
-        let now = Local::now();
-        let time_str = if self.use_24h_for_header() {
-            now.format("%H:%M:%S").to_string()
-        } else {
-            now.format("%-I:%M:%S %p").to_string()
-        };
-        let date_str = now.format("%a, %b %d %Y").to_string();
-        let tz_abbr = now.format("%Z").to_string();
+        let icon = Span::styled(" ⏲ ", Style::default().fg(theme::HEADER_ICON));
+        let title = Span::styled("woti", Style::default().fg(theme::HEADER_TITLE).bold());
 
-        let right = format!("{date_str}  {time_str} {tz_abbr}");
-
-        let title = Span::styled(" woti", Style::default().fg(Color::Cyan).bold());
-        let spacer_width = area.width.saturating_sub(5 + right.len() as u16 + 1);
-        let spacer = Span::raw(" ".repeat(spacer_width as usize));
-        let right_span = Span::styled(
-            format!("{right} "),
-            Style::default().fg(Color::White).dim(),
-        );
-
-        let line = Line::from(vec![title, spacer, right_span]);
-        let p = Paragraph::new(line).style(Style::default().bg(Color::DarkGray));
+        let line = Line::from(vec![icon, title]);
+        let p = Paragraph::new(line).style(Style::default().bg(theme::HEADER_BG));
         frame.render_widget(p, area);
     }
 
     fn render_footer(&self, frame: &mut Frame, area: Rect, body_height: u16) {
+        let footer_bg = Style::default().bg(theme::FOOTER_BG);
+
         if let Some(t) = self.copied_at {
             if t.elapsed() < Duration::from_secs(2) {
                 let line = Line::from(vec![
-                    Span::styled(" Copied! ", Style::default().fg(Color::Green).bold()),
+                    Span::styled(" Copied! ", Style::default().fg(theme::COPIED).bold()),
                 ]);
-                let p = Paragraph::new(line).style(Style::default().bg(Color::DarkGray));
-                frame.render_widget(p, area);
+                frame.render_widget(Paragraph::new(line).style(footer_bg), area);
                 return;
             }
         }
@@ -79,12 +65,12 @@ impl App {
         let can_up = self.scroll_offset > 0;
         let can_down = self.scroll_offset < max;
 
-        let key_on = Style::default().fg(Color::Black).bg(Color::Gray);
+        let key_on = Style::default().fg(theme::KEY_FG).bg(theme::KEY_BG);
         let key_off = Style::default()
-            .fg(Color::DarkGray)
-            .bg(Color::Rgb(50, 50, 50));
-        let label_on = Style::default().fg(Color::Gray);
-        let label_off = Style::default().fg(Color::DarkGray);
+            .fg(theme::KEY_DISABLED_FG)
+            .bg(theme::KEY_DISABLED_BG);
+        let label_on = Style::default().fg(theme::LABEL_FG);
+        let label_off = Style::default().fg(theme::LABEL_DISABLED_FG);
 
         let shortcuts = vec![
             Span::styled(" ↑ ", if can_up { key_on } else { key_off }),
@@ -102,11 +88,11 @@ impl App {
         ];
 
         let sel = Style::default()
-            .fg(Color::Cyan)
-            .bg(Color::Rgb(60, 60, 60))
+            .fg(theme::SWITCHER_ACTIVE_FG)
+            .bg(theme::SWITCHER_ACTIVE_BG)
             .bold();
-        let dim = Style::default().fg(Color::Gray);
-        let sep = Style::default().fg(Color::Rgb(80, 80, 80));
+        let dim = Style::default().fg(theme::SWITCHER_DIM_FG);
+        let sep = Style::default().fg(theme::SWITCHER_SEP);
 
         let fmt_switcher: Vec<Span> = vec![
             Span::styled(" f ", key_on),
@@ -149,8 +135,7 @@ impl App {
         spans.extend(fmt_switcher);
 
         let line = Line::from(spans);
-        let p = Paragraph::new(line).style(Style::default().bg(Color::DarkGray));
-        frame.render_widget(p, area);
+        frame.render_widget(Paragraph::new(line).style(footer_bg), area);
     }
 
     fn render_body(&self, frame: &mut Frame, area: Rect) {
@@ -244,9 +229,9 @@ impl App {
         let region_len = entry.region.len() + date_str.len();
         let info_gap3 = info_w.saturating_sub(region_len);
         let mut line3 = vec![
-            Span::styled(&entry.region, Style::default().fg(Color::DarkGray)),
+            Span::styled(&entry.region, Style::default().fg(theme::SECONDARY_FG)),
             Span::raw(" ".repeat(info_gap3)),
-            Span::styled(date_str, Style::default().fg(Color::DarkGray)),
+            Span::styled(date_str, Style::default().fg(theme::SECONDARY_FG)),
             Span::raw(" ".repeat(TIMELINE_GAP as usize)),
         ];
         line3.extend(ampm_spans);
@@ -269,13 +254,13 @@ struct TimelineParams {
 
 fn selected_style() -> Style {
     Style::default()
-        .fg(Color::Black)
-        .bg(Color::Yellow)
+        .fg(theme::SELECTED_FG)
+        .bg(theme::SELECTED_BG)
         .bold()
 }
 
 fn local_style() -> Style {
-    Style::default().bg(Color::Rgb(50, 50, 50))
+    Style::default().bg(theme::LOCAL_BG)
 }
 
 fn build_hour_spans(p: &TimelineParams) -> Vec<Span<'static>> {
@@ -297,9 +282,9 @@ fn build_hour_spans(p: &TimelineParams) -> Vec<Span<'static>> {
         let style = if is_selected {
             selected_style()
         } else if is_local {
-            local_style().fg(Color::White)
+            local_style().fg(theme::HOUR_FG)
         } else {
-            Style::default().fg(Color::White)
+            Style::default().fg(theme::HOUR_FG)
         };
 
         spans.push(Span::raw(" "));
@@ -336,10 +321,10 @@ fn build_ampm_spans(p: &TimelineParams) -> Vec<Span<'static>> {
             let style = if is_selected {
                 selected_style()
             } else if is_local {
-                local_style().fg(Color::DarkGray)
+                local_style().fg(theme::AMPM_FG)
             } else {
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(theme::AMPM_FG)
                     .add_modifier(Modifier::DIM)
             };
 
@@ -412,20 +397,20 @@ fn build_day_spans(p: &TimelineParams) -> Vec<Span<'static>> {
         let has_bg = pos_in_cell > 0;
         if is_sel && has_bg {
             Style::default()
-                .fg(Color::Black)
-                .bg(Color::Yellow)
+                .fg(theme::SELECTED_FG)
+                .bg(theme::SELECTED_BG)
                 .bold()
         } else if is_loc && has_bg {
             if is_lab {
                 Style::default()
-                    .bg(Color::Rgb(50, 50, 50))
-                    .fg(Color::Magenta)
+                    .bg(theme::LOCAL_BG)
+                    .fg(theme::DAY_LABEL)
                     .bold()
             } else {
-                Style::default().bg(Color::Rgb(50, 50, 50))
+                Style::default().bg(theme::LOCAL_BG)
             }
         } else if is_lab {
-            Style::default().fg(Color::Magenta).bold()
+            Style::default().fg(theme::DAY_LABEL).bold()
         } else {
             Style::default()
         }
@@ -466,18 +451,20 @@ fn build_info_line<'a>(
         entry.city.len() + 1 + tz_badge.len() + 1 + offset_str.len() + time_str.len();
     let info_gap = info_w.saturating_sub(parts_len);
     vec![
-        Span::styled(&entry.city, Style::default().fg(Color::White).bold()),
+        Span::styled(&entry.city, Style::default().fg(theme::CITY_FG).bold()),
         Span::raw(" "),
         Span::styled(
             tz_badge,
-            Style::default().fg(Color::White).bg(Color::DarkGray),
+            Style::default()
+                .fg(theme::TZ_BADGE_FG)
+                .bg(theme::TZ_BADGE_BG),
         ),
         Span::raw(" "),
-        Span::styled(offset_str, Style::default().fg(Color::Cyan)),
+        Span::styled(offset_str, Style::default().fg(theme::OFFSET_FG)),
         Span::raw(" ".repeat(info_gap)),
         Span::styled(
             time_str.to_string(),
-            Style::default().fg(Color::Green).bold(),
+            Style::default().fg(theme::TIME_FG).bold(),
         ),
         Span::raw(" ".repeat(TIMELINE_GAP as usize)),
     ]

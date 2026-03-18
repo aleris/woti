@@ -17,21 +17,18 @@ pub struct App {
     pub(super) hour_offset: i32,
     pub(super) scroll_offset: usize,
     pub(super) time_format: TimeFormat,
-    pub(super) system_use_24h: bool,
     pub(super) should_quit: bool,
     pub(super) copied_at: Option<Instant>,
 }
 
 impl App {
     pub fn new(config: AppConfig) -> Self {
-        let system_use_24h = super::time_format::detect_use_24h();
         let time_format = config.time_format.unwrap_or(TimeFormat::Mixed);
         Self {
             config,
             hour_offset: 0,
             scroll_offset: 0,
             time_format,
-            system_use_24h,
             should_quit: false,
             copied_at: None,
         }
