@@ -1,0 +1,59 @@
+#!/bin/bash
+
+# Git post-commit hook to auto-increment version based on commit message
+# - Increments PATCH version if commit message starts with "fix" or "[fix]"
+# - Increments MINOR version otherwise
+# Source of truth: Cargo.toml
+
+# Prevent infinite loop when this hook amends
+if [ "$WOTI_VERSION_HOOK" = "1" ]; then
+    exit 0
+fi
+
+COMMIT_MSG=$(git log -1 --pretty=%B)
+COMMIT_TITLE=$(echo "$COMMIT_MSG" | head -n 1)
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+CARGO_TOML="$REPO_ROOT/Cargo.toml"
+CARGO_LOCK="$REPO_ROOT/Cargo.lock"
+
+CURRENT_VERSION=$(grep -A0 '^version' "$CARGO_TOML" | head -1 | sed 's/.*"\([0-9]*\.[0-9]*\.[0-9]*\)".*/\1/')
+
+if [ -z "$CURRENT_VERSION" ]; then
+    echo "Error: Could not extract version from $CARGO_TOML"
+    exit 1
+fi
+
+MAJOR=$(echo "$CURRENT_VERSION" | cut -d. -f1)
+MINOR=$(echo "$CURRENT_VERSION" | cut -d. -f2)
+PATCH=$(echo "$CURRENT_VERSION" | cut -d. -f3)
+
+COMMIT_TITLE_LOWER=$(echo "$COMMIT_TITLE" | tr '[:upper:]' '[:lower:]')
+
+if [[ "$COMMIT_TITLE_LOWER" =~ ^fix[[:space:]:] ]] || [[ "$COMMIT_TITLE_LOWER" =~ ^\[fix\] ]]; then
+    PATCH=$((PATCH + 1))
+else
+    MINOR=$((MINOR + 1))
+    PATCH=0
+fi
+
+NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+
+echo "Bumping version: $CURRENT_VERSION → $NEW_VERSION"
+
+# Update Cargo.toml (only the [package] version, not dependency versions)
+sed -i '' "/^\[package\]/,/^\[/ s/^version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/" "$CARGO_TOML"
+
+# Update Cargo.lock
+if [ -f "$CARGO_LOCK" ]; then
+    sed -i '' "/^name = \"woti\"/{n;s/^version = \"$CURRENT_VERSION\"/version = \"$NEW_VERSION\"/;}" "$CARGO_LOCK"
+fi
+
+git add "$CARGO_TOML"
+if [ -f "$CARGO_LOCK" ]; then
+    git add "$CARGO_LOCK"
+fi
+
+WOTI_VERSION_HOOK=1 git commit --amend --no-edit --no-verify
+
+exit 0

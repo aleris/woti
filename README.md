@@ -28,6 +28,8 @@ Local and UTC are preconfigured by default. Configuration is stored in `~/.confi
 Requires Rust 2024 edition (1.85+).
 
 ```
+make setup-dev
+
 cargo build
 cargo run
 cargo test
