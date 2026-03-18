@@ -19,36 +19,44 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            container: rust:latest
             asset_os: linux
             asset_arch: x86_64
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
-            container: ghcr.io/cross-rs/aarch64-unknown-linux-gnu:latest
             asset_os: linux
             asset_arch: aarch64
+            cross_packages: gcc-aarch64-linux-gnu
+            linker: aarch64-linux-gnu-gcc
           - target: x86_64-apple-darwin
             os: macos-latest
-            container: ""
             asset_os: darwin
             asset_arch: x86_64
           - target: aarch64-apple-darwin
             os: macos-latest
-            container: ""
             asset_os: darwin
             asset_arch: aarch64
 
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
-    container: ${{ matrix.container || null }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Add Rust target
-        run: rustup target add ${{ matrix.target }}
+      - name: Install Rust toolchain
+        run: |
+          rustup update stable
+          rustup default stable
+          rustup target add ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.cross_packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.cross_packages }}
 
       - name: Build
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.linker || '' }}
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package
