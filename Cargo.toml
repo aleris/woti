@@ -1,6 +1,6 @@
 [package]
 name = "woti"
-version = "0.6.1"
+version = "0.7.0"
 edition = "2024"
 description = "World time in your terminal — see current times across time zones at a glance"
 
@@ -9,8 +9,8 @@ arboard = "3"
 chrono = "0.4"
 chrono-tz = { version = "0.10", features = ["case-insensitive"] }
 clap = { version = "4", features = ["derive"] }
-crossterm = "0.28"
+crossterm = "0.29"
 directories = "6"
-ratatui = "0.29"
+ratatui = "0.30"
 serde = { version = "1", features = ["derive"] }
-toml = "0.8"
+toml = "0.9.8"
