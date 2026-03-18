@@ -1,6 +1,6 @@
-# woti
+# ⏲ woti
 
-World time in your terminal — see current times across time zones at a glance.
+World time in your terminal - see current times across time zones at a glance.
 
 ![screenshot.png](screenshot.png)
 
