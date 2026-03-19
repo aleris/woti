@@ -37,9 +37,9 @@ Local and UTC are preconfigured by default. Configuration is stored in `~/.confi
 
 - `←` / `→`: scroll the timeline by hour
 - `↑` / `↓`: scroll timezone list
-- `c`: copy current selection to clipboard
+- `c`: copy the current selected hours column to clipboard
 - `f`: cycle time format (mixed -> am/pm -> 24h → …)
-- `q` / `x` / `Esc`: exit
+- `q` / `x` / `Esc`, `ctrl+c`: exit
 
 ## Development
 
@@ -49,7 +49,6 @@ Before committing, run dev setup to install the git hook to increment version.
 ```sh
 make setup-dev
 ```
-
 
 Build, test, run:
 ```sh

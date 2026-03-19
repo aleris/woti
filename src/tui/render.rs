@@ -376,7 +376,9 @@ fn build_day_spans(p: &TimelineParams) -> Vec<Span<'static>> {
                 dt.format("%a").to_string().to_uppercase(),
                 dt.format("%-d")
             );
-            let start_pos = (i as usize) * p.cell_w;
+            let midnight_display = if p.use_24h { 0 } else { 12_i32 };
+            let digit_offset = if midnight_display >= 10 { 1 } else { 2 };
+            let start_pos = (i as usize) * p.cell_w + digit_offset;
             for (j, ch) in day_label.chars().enumerate() {
                 let pos = start_pos + j;
                 if pos < total_day_chars {
@@ -468,4 +470,59 @@ fn build_info_line<'a>(
         ),
         Span::raw(" ".repeat(TIMELINE_GAP as usize)),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn make_params(use_24h: bool) -> TimelineParams {
+        let tz: Tz = chrono_tz::UTC;
+        let now_tz = tz.with_ymd_and_hms(2026, 3, 19, 22, 0, 0).unwrap();
+        TimelineParams {
+            start_hour: -2,
+            base_hour: 0,
+            current_hour: 22,
+            hour_offset: -22,
+            num_cells: 10,
+            cell_w: CELL_WIDTH as usize,
+            use_24h,
+            offset_m: 0,
+            tz,
+            now_tz,
+        }
+    }
+
+    fn spans_to_string(spans: &[Span]) -> String {
+        spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn day_label_aligns_with_midnight_digit_24h() {
+        let p = make_params(true);
+        let spans = build_day_spans(&p);
+        let text = spans_to_string(&spans);
+        let midnight_cell = 2_usize;
+        let expected_pos = midnight_cell * p.cell_w + 2;
+        let first_non_space = text.find(|c: char| c != ' ').unwrap();
+        assert_eq!(
+            first_non_space, expected_pos,
+            "24h: label should start at digit offset +2, got text: '{text}'"
+        );
+    }
+
+    #[test]
+    fn day_label_aligns_with_midnight_digit_12h() {
+        let p = make_params(false);
+        let spans = build_day_spans(&p);
+        let text = spans_to_string(&spans);
+        let midnight_cell = 2_usize;
+        let expected_pos = midnight_cell * p.cell_w + 1;
+        let first_non_space = text.find(|c: char| c != ' ').unwrap();
+        assert_eq!(
+            first_non_space, expected_pos,
+            "12h: label should start at digit offset +1, got text: '{text}'"
+        );
+    }
 }
