@@ -18,7 +18,7 @@ impl App {
     pub(super) fn build_copy_text(&self) -> String {
         let now_utc = Utc::now();
         let mut lines = Vec::new();
-        let mut ref_date = None;
+        let mut ref_date: Option<chrono::NaiveDate> = None;
 
         for entry in &self.config.timezones {
             let tz: Tz = entry.iana_id.parse().unwrap_or(chrono_tz::UTC);
@@ -50,11 +50,18 @@ impl App {
                     String::new()
                 }
                 Some(ref_d) if date != ref_d => {
-                    format!(
+                    let mut suffix = format!(
                         " {} {}",
                         selected_dt.format("%a").to_string().to_uppercase(),
                         selected_dt.day()
-                    )
+                    );
+                    if date.month() != ref_d.month() || date.year() != ref_d.year() {
+                        suffix.push_str(&format!(", {}", selected_dt.format("%B")));
+                        if date.year() != ref_d.year() {
+                            suffix.push_str(&format!(", {}", selected_dt.format("%Y")));
+                        }
+                    }
+                    suffix
                 }
                 _ => String::new(),
             };
@@ -205,5 +212,89 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert!(lines[0].contains(":00"), "UTC line: {}", lines[0]);
         assert!(lines[1].contains(":30"), "Kolkata line: {}", lines[1]);
+    }
+
+    #[test]
+    fn copy_includes_month_when_month_differs() {
+        use chrono::{Datelike, Timelike, Utc};
+
+        let now_utc = Utc::now();
+        let year = now_utc.year();
+        let target_year = if now_utc.month() > 3
+            || (now_utc.month() == 3 && now_utc.day() == 31 && now_utc.hour() >= 11)
+        {
+            year + 1
+        } else {
+            year
+        };
+        let target = chrono::NaiveDate::from_ymd_opt(target_year, 3, 31)
+            .unwrap()
+            .and_hms_opt(11, 0, 0)
+            .unwrap();
+        let target_utc =
+            chrono::DateTime::<Utc>::from_naive_utc_and_offset(target, Utc);
+        let hour_offset = target_utc
+            .signed_duration_since(now_utc)
+            .num_hours() as i32;
+
+        let mut app = app_with(
+            vec![
+                entry("UTC", "UTC"),
+                entry("Pacific/Kiritimati", "Kiritimati"),
+            ],
+            TimeFormat::H24,
+        );
+        app.hour_offset = hour_offset;
+        let text = app.build_copy_text();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 2);
+        assert!(
+            lines[1].contains(", April"),
+            "should include month when month differs, got: {}",
+            lines[1]
+        );
+    }
+
+    #[test]
+    fn copy_includes_year_when_year_differs() {
+        use chrono::{Datelike, Timelike, Utc};
+
+        let now_utc = Utc::now();
+        let year = now_utc.year();
+        let target_year = if now_utc.month() == 12
+            && now_utc.day() == 31
+            && now_utc.hour() >= 11
+        {
+            year + 1
+        } else {
+            year
+        };
+        let target = chrono::NaiveDate::from_ymd_opt(target_year, 12, 31)
+            .unwrap()
+            .and_hms_opt(11, 0, 0)
+            .unwrap();
+        let target_utc =
+            chrono::DateTime::<Utc>::from_naive_utc_and_offset(target, Utc);
+        let hour_offset = target_utc
+            .signed_duration_since(now_utc)
+            .num_hours() as i32;
+
+        let mut app = app_with(
+            vec![
+                entry("UTC", "UTC"),
+                entry("Pacific/Kiritimati", "Kiritimati"),
+            ],
+            TimeFormat::H24,
+        );
+        app.hour_offset = hour_offset;
+        let text = app.build_copy_text();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 2);
+        let next_year = target_year + 1;
+        assert!(
+            lines[1].contains(&format!(", January, {next_year}")),
+            "should include month and year when year differs, got: {}",
+            lines[1]
+        );
     }
 }

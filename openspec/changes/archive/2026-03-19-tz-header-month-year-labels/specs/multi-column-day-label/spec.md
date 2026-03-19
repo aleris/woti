@@ -1,3 +1,5 @@
+## MODIFIED Requirements
+
 ### Requirement: Day marker displays date alongside day name
 The timeline day marker row SHALL display the short weekday name followed by a space and the numeric day-of-month (e.g., "WED 18", "THU 1") at each day boundary. When the displayed date's month differs from today's month in that timezone, the label SHALL append a comma, space, and the full month name (e.g., "WED 1, April"). When the displayed date's year also differs from today's year in that timezone, the label SHALL further append a comma, space, and the four-digit year (e.g., "WED 1, April, 2027").
 
@@ -31,29 +33,3 @@ The day marker label SHALL span across as many 3-character columns as needed to 
 #### Scenario: Label truncated at timeline edge
 - **WHEN** a day marker label (with or without month/year suffix) would extend beyond the right edge of the visible timeline
 - **THEN** the label is truncated to fit within the available space
-
-### Requirement: Day label alignment with hour row
-The day marker label SHALL start at the same character position as the first displayed digit of the midnight hour number. Each cell is laid out as [gap-space][digit1][digit2] where the hour is formatted with `{:>2}`. The digit offset depends on whether the midnight hour display is single or double digit: +2 for single-digit (24h: "0"), +1 for double-digit (12h: "12").
-
-#### Scenario: Vertical alignment in 24-hour format
-- **WHEN** the midnight column is at cell index N and 24-hour format is active
-- **THEN** the day label starts at character position `N * cell_width + 2`, aligning with the digit "0" in the right-aligned `" 0"` display
-
-#### Scenario: Vertical alignment in 12-hour format
-- **WHEN** the midnight column is at cell index N and 12-hour format is active
-- **THEN** the day label starts at character position `N * cell_width + 1`, aligning with the digit "1" in the `"12"` display
-
-#### Scenario: Label near right edge of timeline
-- **WHEN** the day label would extend beyond the available timeline character positions due to the offset
-- **THEN** the label is truncated to fit within the available space
-
-### Requirement: Day label styling preserved
-The day marker label SHALL use the same styling rules as the current implementation: magenta bold for normal days, cell highlight style for the selected hour column, and local-hour background style when applicable.
-
-#### Scenario: Selected hour at midnight
-- **WHEN** the selected hour falls on a midnight boundary
-- **THEN** the day label characters within the selected column use the selected highlight style (black on yellow)
-
-#### Scenario: Normal day marker styling
-- **WHEN** a day label is displayed outside the selected and local hour columns
-- **THEN** the label text is styled in magenta bold

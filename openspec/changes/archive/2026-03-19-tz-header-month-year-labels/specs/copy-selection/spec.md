@@ -1,3 +1,5 @@
+## MODIFIED Requirements
+
 ### Requirement: Copy selected hour to clipboard
 The system SHALL copy the currently highlighted hour column for all configured timezones to the system clipboard when the user presses the `c` key.
 
@@ -20,32 +22,3 @@ The system SHALL copy the currently highlighted hour column for all configured t
 #### Scenario: First timezone never shows day suffix
 - **WHEN** the user presses `c`
 - **THEN** the first timezone line SHALL never include a day suffix, as it serves as the reference day
-
-### Requirement: Time format matches display setting
-The copied text SHALL use the same 12h/24h format as the current TUI display.
-
-#### Scenario: Copy in 12h mode
-- **WHEN** the app is in 12h mode and the user presses `c`
-- **THEN** times SHALL be formatted as `4pm` or `11am` (no space before am/pm, no leading zero)
-
-#### Scenario: Copy in 24h mode
-- **WHEN** the app is in 24h mode and the user presses `c`
-- **THEN** times SHALL be formatted as `16:00` or `09:00`
-
-### Requirement: Visual feedback on copy
-The system SHALL display a brief confirmation in the footer when a copy operation succeeds.
-
-#### Scenario: Successful copy shows confirmation
-- **WHEN** the user presses `c` and the clipboard write succeeds
-- **THEN** the footer SHALL display a "Copied!" message that reverts to the normal shortcut bar after approximately 2 seconds
-
-#### Scenario: Failed copy shows no crash
-- **WHEN** the user presses `c` but clipboard access fails (e.g., headless environment)
-- **THEN** the app SHALL NOT crash and MAY show an error hint in the footer
-
-### Requirement: Copy shortcut shown in footer
-The footer shortcut bar SHALL include the `c` key with a "Copy" label.
-
-#### Scenario: Footer displays copy shortcut
-- **WHEN** the TUI is displayed
-- **THEN** the footer SHALL show ` c ` with label ` Copy ` alongside existing shortcuts

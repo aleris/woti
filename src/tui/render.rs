@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use chrono::{Offset, Timelike, Utc};
+use chrono::{Datelike, Offset, Timelike, Utc};
 use chrono_tz::Tz;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -371,11 +371,19 @@ fn build_day_spans(p: &TimelineParams) -> Vec<Span<'static>> {
 
         if hour_in_day == 0 {
             let dt = compute_datetime_for_hour(p.tz, p.now_tz, h - p.current_hour);
-            let day_label = format!(
+            let today = p.now_tz.date_naive();
+            let label_date = dt.date_naive();
+            let mut day_label = format!(
                 "{} {}",
                 dt.format("%a").to_string().to_uppercase(),
                 dt.format("%-d")
             );
+            if label_date.month() != today.month() || label_date.year() != today.year() {
+                day_label.push_str(&format!(", {}", dt.format("%B")));
+                if label_date.year() != today.year() {
+                    day_label.push_str(&format!(", {}", dt.format("%Y")));
+                }
+            }
             let midnight_display = if p.use_24h { 0 } else { 12_i32 };
             let digit_offset = if midnight_display >= 10 { 1 } else { 2 };
             let start_pos = (i as usize) * p.cell_w + digit_offset;
@@ -523,6 +531,60 @@ mod tests {
         assert_eq!(
             first_non_space, expected_pos,
             "12h: label should start at digit offset +1, got text: '{text}'"
+        );
+    }
+
+    #[test]
+    fn day_label_includes_month_on_month_boundary() {
+        let tz: Tz = chrono_tz::UTC;
+        // March 31, 2026 22:00 — cell 2 crosses midnight into April 1 (Wednesday)
+        let now_tz = tz.with_ymd_and_hms(2026, 3, 31, 22, 0, 0).unwrap();
+        let p = TimelineParams {
+            start_hour: 22,
+            base_hour: 22,
+            current_hour: 22,
+            hour_offset: 0,
+            num_cells: 10,
+            cell_w: CELL_WIDTH as usize,
+            use_24h: true,
+            offset_m: 0,
+            tz,
+            now_tz,
+        };
+        let spans = build_day_spans(&p);
+        let text = spans_to_string(&spans);
+        assert!(
+            text.contains("WED 1, April"),
+            "month boundary label should include month name, got: '{text}'"
+        );
+        assert!(
+            !text.contains("2026"),
+            "same-year label should not include year, got: '{text}'"
+        );
+    }
+
+    #[test]
+    fn day_label_includes_month_and_year_on_year_boundary() {
+        let tz: Tz = chrono_tz::UTC;
+        // Dec 31, 2026 22:00 — cell 2 crosses midnight into Jan 1, 2027 (Friday)
+        let now_tz = tz.with_ymd_and_hms(2026, 12, 31, 22, 0, 0).unwrap();
+        let p = TimelineParams {
+            start_hour: 22,
+            base_hour: 22,
+            current_hour: 22,
+            hour_offset: 0,
+            num_cells: 10,
+            cell_w: CELL_WIDTH as usize,
+            use_24h: true,
+            offset_m: 0,
+            tz,
+            now_tz,
+        };
+        let spans = build_day_spans(&p);
+        let text = spans_to_string(&spans);
+        assert!(
+            text.contains("FRI 1, January, 2027"),
+            "year boundary label should include month and year, got: '{text}'"
         );
     }
 }
