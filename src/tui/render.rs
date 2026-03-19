@@ -364,6 +364,7 @@ fn build_day_spans(p: &TimelineParams) -> Vec<Span<'static>> {
     let total_day_chars = (p.num_cells as usize) * p.cell_w;
     let mut day_chars: Vec<char> = vec![' '; total_day_chars];
     let mut day_is_label: Vec<bool> = vec![false; total_day_chars];
+    let mut day_label_origin: Vec<Option<i32>> = vec![None; total_day_chars];
 
     for i in 0..p.num_cells {
         let h = p.start_hour + i;
@@ -392,6 +393,7 @@ fn build_day_spans(p: &TimelineParams) -> Vec<Span<'static>> {
                 if pos < total_day_chars {
                     day_chars[pos] = ch;
                     day_is_label[pos] = true;
+                    day_label_origin[pos] = Some(h);
                 }
             }
         }
@@ -405,12 +407,15 @@ fn build_day_spans(p: &TimelineParams) -> Vec<Span<'static>> {
         let is_loc = h == p.current_hour && p.hour_offset != 0;
         let is_lab = day_is_label[pos];
         let has_bg = pos_in_cell > 0;
-        if is_sel && has_bg {
+        let origin = day_label_origin[pos];
+        let label_sel = is_lab && origin == Some(p.base_hour);
+        let label_loc = is_lab && origin == Some(p.current_hour) && p.hour_offset != 0;
+        if label_sel || (is_sel && has_bg) {
             Style::default()
                 .fg(theme::SELECTED_FG)
                 .bg(theme::SELECTED_BG)
                 .bold()
-        } else if is_loc && has_bg {
+        } else if label_loc || (is_loc && has_bg) {
             if is_lab {
                 Style::default()
                     .bg(theme::LOCAL_BG)
@@ -585,6 +590,76 @@ mod tests {
         assert!(
             text.contains("FRI 1, January, 2027"),
             "year boundary label should include month and year, got: '{text}'"
+        );
+    }
+
+    fn selected_bg_text(spans: &[Span]) -> String {
+        spans
+            .iter()
+            .filter(|s| s.style.bg == Some(theme::SELECTED_BG))
+            .map(|s| s.content.as_ref())
+            .collect()
+    }
+
+    #[test]
+    fn selection_at_midnight_highlights_full_day_label() {
+        // make_params: base_hour=0 (midnight, selected), 24h mode
+        // Label "THU 19" spans positions 8..14 across cells 2-4
+        let p = make_params(true);
+        let spans = build_day_spans(&p);
+        let sel_text = selected_bg_text(&spans);
+        assert!(
+            sel_text.contains("THU 19"),
+            "selection at midnight should highlight full label, got selected text: '{sel_text}'"
+        );
+    }
+
+    #[test]
+    fn selection_not_at_midnight_keeps_single_cell_highlight() {
+        let tz: Tz = chrono_tz::UTC;
+        let now_tz = tz.with_ymd_and_hms(2026, 3, 19, 22, 0, 0).unwrap();
+        let p = TimelineParams {
+            start_hour: -2,
+            base_hour: 3,
+            current_hour: 22,
+            hour_offset: -19,
+            num_cells: 10,
+            cell_w: CELL_WIDTH as usize,
+            use_24h: true,
+            offset_m: 0,
+            tz,
+            now_tz,
+        };
+        let spans = build_day_spans(&p);
+        let sel_text = selected_bg_text(&spans);
+        assert!(
+            !sel_text.contains("THU"),
+            "non-midnight selection should not highlight day label, got selected text: '{sel_text}'"
+        );
+    }
+
+    #[test]
+    fn selection_at_midnight_highlights_label_with_month_suffix() {
+        let tz: Tz = chrono_tz::UTC;
+        // March 31, 2026 22:00 — select midnight (h=24) crossing into April 1
+        let now_tz = tz.with_ymd_and_hms(2026, 3, 31, 22, 0, 0).unwrap();
+        let p = TimelineParams {
+            start_hour: 19,
+            base_hour: 24,
+            current_hour: 22,
+            hour_offset: 2,
+            num_cells: 10,
+            cell_w: CELL_WIDTH as usize,
+            use_24h: true,
+            offset_m: 0,
+            tz,
+            now_tz,
+        };
+        let spans = build_day_spans(&p);
+        let sel_text = selected_bg_text(&spans);
+        assert!(
+            sel_text.contains("WED 1, April"),
+            "selection at month-boundary midnight should highlight full label including month, got: '{sel_text}'"
         );
     }
 }
