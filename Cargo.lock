@@ -2537,7 +2537,7 @@ dependencies = [
 
 [[package]]
 name = "woti"
-version = "0.23.0"
+version = "0.23.1"
 dependencies = [
  "arboard",
  "chrono",
@@ -2545,6 +2545,7 @@ dependencies = [
  "clap",
  "crossterm",
  "dirs",
+ "iana-time-zone",
  "ratatui",
  "serde",
  "toml",

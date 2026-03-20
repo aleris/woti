@@ -99,23 +99,37 @@ impl Default for AppConfig {
     }
 }
 
+fn tz_from_env() -> Option<String> {
+    let val = std::env::var("TZ").ok()?;
+    if val.is_empty() {
+        return None;
+    }
+    val.parse::<chrono_tz::Tz>().ok()?;
+    Some(val)
+}
+
 fn localtime_iana() -> Option<String> {
-    // Read the /etc/localtime symlink to determine the system IANA timezone,
-    // following the same approach as the time-tz crate.
+    if let Some(tz) = tz_from_env() {
+        return Some(tz);
+    }
+
+    if let Ok(tz) = iana_time_zone::get_timezone() {
+        return Some(tz);
+    }
+
     #[cfg(unix)]
     {
         let path = std::path::Path::new("/etc/localtime");
-        let realpath = std::fs::read_link(path).ok()?;
-        realpath
+        let realpath = std::fs::canonicalize(path).ok()?;
+        return realpath
             .to_str()?
             .split("/zoneinfo/")
             .last()
-            .map(|s| s.to_string())
+            .map(|s| s.to_string());
     }
-    #[cfg(not(unix))]
-    {
-        None
-    }
+
+    #[allow(unreachable_code)]
+    None
 }
 
 impl AppConfig {
