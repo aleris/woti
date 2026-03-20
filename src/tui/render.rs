@@ -305,7 +305,8 @@ fn build_hour_spans(p: &TimelineParams) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     for i in 0..p.num_cells {
         let h = p.start_hour + i;
-        let hour_in_day = ((h % 24) + 24) % 24;
+        let dt = compute_datetime_for_hour(p.tz, p.now_tz, h - p.current_hour);
+        let hour_in_day = dt.hour() as i32;
         let is_selected = h == p.base_hour;
         let is_local = h == p.current_hour && p.hour_offset != 0;
 
@@ -356,7 +357,8 @@ fn build_ampm_spans(p: &TimelineParams) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     for i in 0..p.num_cells {
         let h = p.start_hour + i;
-        let hour_in_day = ((h % 24) + 24) % 24;
+        let dt = compute_datetime_for_hour(p.tz, p.now_tz, h - p.current_hour);
+        let hour_in_day = dt.hour() as i32;
         let is_selected = h == p.base_hour;
         let is_local = h == p.current_hour && p.hour_offset != 0;
 
@@ -416,10 +418,9 @@ fn build_day_spans(p: &TimelineParams) -> Vec<Span<'static>> {
 
     for i in 0..p.num_cells {
         let h = p.start_hour + i;
-        let hour_in_day = ((h % 24) + 24) % 24;
+        let dt = compute_datetime_for_hour(p.tz, p.now_tz, h - p.current_hour);
 
-        if hour_in_day == 0 {
-            let dt = compute_datetime_for_hour(p.tz, p.now_tz, h - p.current_hour);
+        if dt.hour() == 0 {
             let today = p.now_tz.date_naive();
             let label_date = dt.date_naive();
             let mut day_label = format!(
