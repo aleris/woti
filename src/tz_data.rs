@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use chrono::{NaiveDate, TimeZone};
+use chrono::{Datelike, NaiveDate, TimeZone, Utc};
 use chrono_tz::{OffsetName, Tz, TZ_VARIANTS};
 
 // ---------------------------------------------------------------------------
@@ -48,11 +48,12 @@ const PREFERRED_ZONES: &[Tz] = &[
 fn build_abbreviation_map() -> HashMap<String, Tz> {
     let mut map: HashMap<String, Tz> = HashMap::new();
 
-    let winter = NaiveDate::from_ymd_opt(2025, 1, 15)
+    let year = Utc::now().year();
+    let winter = NaiveDate::from_ymd_opt(year, 1, 15)
         .unwrap()
         .and_hms_opt(12, 0, 0)
         .unwrap();
-    let summer = NaiveDate::from_ymd_opt(2025, 7, 15)
+    let summer = NaiveDate::from_ymd_opt(year, 7, 15)
         .unwrap()
         .and_hms_opt(12, 0, 0)
         .unwrap();
