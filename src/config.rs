@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use directories::ProjectDirs;
+use dirs::home_dir;
 use serde::{Deserialize, Serialize};
 
 use crate::tz_data;
@@ -119,8 +119,42 @@ fn localtime_iana() -> Option<String> {
 }
 
 impl AppConfig {
+    fn xdg_config_path() -> Option<PathBuf> {
+        home_dir().map(|h| h.join(".config").join("woti").join("config.toml"))
+    }
+
+    fn legacy_config_path() -> Option<PathBuf> {
+        #[cfg(target_os = "macos")]
+        {
+            home_dir().map(|h| {
+                h.join("Library")
+                    .join("Application Support")
+                    .join("woti")
+                    .join("config.toml")
+            })
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            None
+        }
+    }
+
     pub fn config_path() -> Option<PathBuf> {
-        ProjectDirs::from("", "", "woti").map(|dirs| dirs.config_dir().join("config.toml"))
+        let xdg = Self::xdg_config_path();
+        if xdg.as_ref().is_some_and(|p| p.exists()) {
+            return xdg;
+        }
+
+        let legacy = Self::legacy_config_path();
+        if legacy.as_ref().is_some_and(|p| p.exists()) {
+            return legacy;
+        }
+
+        xdg
+    }
+
+    fn save_path() -> Option<PathBuf> {
+        Self::xdg_config_path()
     }
 
     pub fn load() -> Self {
@@ -139,7 +173,7 @@ impl AppConfig {
     }
 
     pub fn save(&self) -> Result<(), String> {
-        let Some(path) = Self::config_path() else {
+        let Some(path) = Self::save_path() else {
             return Err("Could not determine config directory".to_string());
         };
 
@@ -365,5 +399,37 @@ enabled = false
         assert!(!loaded.working_hours.enabled);
         assert_eq!(loaded.working_hours.work_start, 9);
         assert_eq!(loaded.working_hours.work_end, 18);
+    }
+
+    // --- Spec: "XDG config path" ---
+
+    #[test]
+    fn xdg_config_path_ends_with_expected_suffix() {
+        let path = AppConfig::xdg_config_path().expect("home dir should resolve");
+        assert!(
+            path.ends_with(".config/woti/config.toml"),
+            "expected path ending .config/woti/config.toml, got {path:?}"
+        );
+    }
+
+    #[test]
+    fn save_path_equals_xdg_path() {
+        assert_eq!(AppConfig::save_path(), AppConfig::xdg_config_path());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn legacy_config_path_is_app_support_on_macos() {
+        let path = AppConfig::legacy_config_path().expect("home dir should resolve");
+        assert!(
+            path.ends_with("Library/Application Support/woti/config.toml"),
+            "expected macOS legacy path, got {path:?}"
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn legacy_config_path_is_none_on_non_macos() {
+        assert!(AppConfig::legacy_config_path().is_none());
     }
 }
