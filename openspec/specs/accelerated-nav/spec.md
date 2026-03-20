@@ -21,30 +21,36 @@ The event loop SHALL process `KeyEventKind::Repeat` events for left and right ar
 - **THEN** navigation SHALL still work via individual `Press` events at step size 1
 
 ### Requirement: Time-based acceleration ramp
-When the user holds a left or right arrow key, the step size SHALL increase based on elapsed time since the first press in the current direction.
+When the user holds a left or right arrow key, the step size SHALL increase linearly based on elapsed time since the first press in the current direction.
 
-The acceleration tiers SHALL be:
-- Less than 400 ms: step size 1
-- 400 ms to 1000 ms: step size 2
-- 1000 ms to 2000 ms: step size 4
-- Greater than 2000 ms: step size 8
+The step size SHALL be computed as:
+- `t = clamp(elapsed_ms / ACCEL_MAX_MS, 0.0, 1.0)`
+- `step = 1 + floor((ACCEL_MAX_STEP - 1) * t)`
 
-#### Scenario: Initial presses stay at step 1
+Where `ACCEL_MAX_MS` is 2000 and `ACCEL_MAX_STEP` is 8.
+
+This means the step grows continuously from 1 (at 0 ms) to `ACCEL_MAX_STEP` (at `ACCEL_MAX_MS` and beyond).
+
+#### Scenario: Immediate press is step 1
 - **WHEN** the user begins holding a left/right key
-- **AND** less than 400 ms has elapsed since the first press
+- **AND** 0 ms has elapsed
 - **THEN** each event moves the timeline by 1 hour
 
-#### Scenario: Medium hold accelerates to step 2
-- **WHEN** the user has been holding a left/right key for 400–1000 ms
-- **THEN** each event moves the timeline by 2 hours
+#### Scenario: Midpoint of ramp
+- **WHEN** the user has been holding a left/right key for 1000 ms (half of ACCEL_MAX_MS)
+- **THEN** each event moves the timeline by 4 hours (`1 + floor(7 * 0.5) = 4`)
 
-#### Scenario: Long hold accelerates to step 4
-- **WHEN** the user has been holding a left/right key for 1000–2000 ms
-- **THEN** each event moves the timeline by 4 hours
+#### Scenario: Near start of ramp
+- **WHEN** the user has been holding a left/right key for 400 ms
+- **THEN** each event moves the timeline by 2 hours (`1 + floor(7 * 0.2) = 2`)
 
-#### Scenario: Extended hold reaches max step 8
-- **WHEN** the user has been holding a left/right key for more than 2000 ms
-- **THEN** each event moves the timeline by 8 hours
+#### Scenario: At maximum
+- **WHEN** the user has been holding a left/right key for 2000 ms or more
+- **THEN** each event moves the timeline by 8 hours (ACCEL_MAX_STEP)
+
+#### Scenario: Beyond maximum is clamped
+- **WHEN** the user has been holding a left/right key for 5000 ms
+- **THEN** each event moves the timeline by 8 hours (does not exceed ACCEL_MAX_STEP)
 
 ### Requirement: Acceleration resets on direction change
 The acceleration state SHALL reset to step size 1 when the user changes navigation direction (e.g., switches from left to right).

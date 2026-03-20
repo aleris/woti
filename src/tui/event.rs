@@ -6,18 +6,11 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 use super::app::App;
-use super::{ACCEL_TIER1_MS, ACCEL_TIER2_MS, ACCEL_TIER3_MS, ACCEL_MAX_STEP, DEBOUNCE_MS};
+use super::{ACCEL_MAX_MS, ACCEL_MAX_STEP, DEBOUNCE_MS};
 
 fn compute_step(elapsed: Duration) -> i32 {
-    if elapsed.as_millis() >= ACCEL_TIER3_MS as u128 {
-        ACCEL_MAX_STEP
-    } else if elapsed.as_millis() >= ACCEL_TIER2_MS as u128 {
-        4
-    } else if elapsed.as_millis() >= ACCEL_TIER1_MS as u128 {
-        2
-    } else {
-        1
-    }
+    let t = (elapsed.as_millis() as f64 / ACCEL_MAX_MS as f64).clamp(0.0, 1.0);
+    1 + ((ACCEL_MAX_STEP - 1) as f64 * t) as i32
 }
 
 impl App {
@@ -162,30 +155,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn step_is_1_below_tier1() {
+    fn step_is_1_at_zero() {
         assert_eq!(compute_step(Duration::from_millis(0)), 1);
-        assert_eq!(compute_step(Duration::from_millis(200)), 1);
-        assert_eq!(compute_step(Duration::from_millis(399)), 1);
     }
 
     #[test]
-    fn step_is_2_at_tier1() {
+    fn step_is_2_at_400ms() {
         assert_eq!(compute_step(Duration::from_millis(400)), 2);
-        assert_eq!(compute_step(Duration::from_millis(700)), 2);
-        assert_eq!(compute_step(Duration::from_millis(999)), 2);
     }
 
     #[test]
-    fn step_is_4_at_tier2() {
+    fn step_is_4_at_midpoint() {
         assert_eq!(compute_step(Duration::from_millis(1000)), 4);
-        assert_eq!(compute_step(Duration::from_millis(1500)), 4);
-        assert_eq!(compute_step(Duration::from_millis(1999)), 4);
     }
 
     #[test]
-    fn step_is_max_at_tier3() {
-        assert_eq!(compute_step(Duration::from_millis(2000)), 8);
-        assert_eq!(compute_step(Duration::from_millis(5000)), 8);
-        assert_eq!(compute_step(Duration::from_millis(10000)), 8);
+    fn step_is_max_at_accel_max_ms() {
+        assert_eq!(compute_step(Duration::from_millis(2000)), ACCEL_MAX_STEP);
+    }
+
+    #[test]
+    fn step_clamps_beyond_max() {
+        assert_eq!(compute_step(Duration::from_millis(5000)), ACCEL_MAX_STEP);
+        assert_eq!(compute_step(Duration::from_millis(10000)), ACCEL_MAX_STEP);
+    }
+
+    #[test]
+    fn step_increases_monotonically() {
+        let mut prev = 0;
+        for ms in (0..=2000).step_by(100) {
+            let step = compute_step(Duration::from_millis(ms));
+            assert!(step >= prev, "step decreased at {ms}ms: {prev} -> {step}");
+            prev = step;
+        }
     }
 }
