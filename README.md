@@ -38,8 +38,16 @@ Local and UTC are preconfigured by default. Configuration is stored in `~/.confi
 - `←` / `→`: scroll the timeline by hour
 - `↑` / `↓`: scroll timezone list
 - `c`: copy the current selected hours column to clipboard
+- `w`: turn workday hours shading on/off
 - `f`: cycle time format (mixed -> am/pm -> 24h → …)
 - `q` / `x` / `Esc`, `ctrl+c`: exit
+
+### Configuration
+
+The configuration is stored in a config file. 
+On macOS/Linux the configuration file is located at `~/.config/woti/config.toml`.
+The file is updated when changed from the cli. 
+You can also update it directly (for example to reorder timezones).
 
 ## Development
 
