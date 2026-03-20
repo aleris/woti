@@ -178,13 +178,14 @@ impl App {
         let current_hour = now_tz.hour() as i32;
 
         let use_24h = self.use_24h_for_tz(&entry.iana_id);
-        let tz_abbr = now_tz.format("%Z").to_string();
+        let selected_dt = compute_datetime_for_hour(tz, now_tz, self.hour_offset);
+        let tz_abbr = selected_dt.format("%Z").to_string();
         let time_str = if use_24h {
-            now_tz.format("%H:%M").to_string()
+            selected_dt.format("%H:%M").to_string()
         } else {
-            now_tz.format("%-I:%M %p").to_string()
+            selected_dt.format("%-I:%M %p").to_string()
         };
-        let date_str = now_tz.format("%a, %b %d").to_string();
+        let date_str = selected_dt.format("%a, %b %d").to_string();
 
         let block = Block::default().padding(Padding::new(1, 1, 0, 0));
         let inner = block.inner(area);
@@ -206,7 +207,7 @@ impl App {
         let start_hour = base_hour - num_cells / 2;
         let cell_w = CELL_WIDTH as usize;
 
-        let utc_secs = now_tz.offset().fix().local_minus_utc();
+        let utc_secs = selected_dt.offset().fix().local_minus_utc();
         let offset_m = (utc_secs.abs() % 3600) / 60;
 
         let shading = if self.shading_enabled {
@@ -237,7 +238,7 @@ impl App {
         line1.extend(day_spans);
         frame.render_widget(Paragraph::new(Line::from(line1)), rows[0]);
 
-        let mut line2 = build_info_line(entry, &tz_abbr, &time_str, now_tz, info_w);
+        let mut line2 = build_info_line(entry, &tz_abbr, &time_str, selected_dt, info_w);
         line2.extend(hour_spans);
         frame.render_widget(Paragraph::new(Line::from(line2)), rows[1]);
 
