@@ -4,6 +4,7 @@ mod timezone;
 mod tui;
 mod tz_data;
 
+use chrono::{DateTime, Local, NaiveDate, NaiveTime, TimeZone, Utc};
 use clap::Parser;
 
 use cli::{Cli, Command};
@@ -11,6 +12,11 @@ use config::AppConfig;
 
 fn main() {
     let cli = Cli::parse();
+
+    if cli.command.is_some() && (cli.date.is_some() || cli.time.is_some()) {
+        eprintln!("error: --date and --time can only be used when launching the TUI (without a subcommand)");
+        std::process::exit(2);
+    }
 
     match cli.command {
         Some(Command::Add { zone }) => cmd_add(&zone.join(" ")),
@@ -21,8 +27,52 @@ fn main() {
                 cmd_remove(&zone.join(" "));
             }
         }
-        None => cmd_tui(),
+        None => {
+            let anchor = parse_anchor(cli.date.as_deref(), cli.time.as_deref());
+            cmd_tui(anchor);
+        }
     }
+}
+
+fn parse_anchor(date: Option<&str>, time: Option<&str>) -> Option<DateTime<Utc>> {
+    if date.is_none() && time.is_none() {
+        return None;
+    }
+
+    let naive_date = match date {
+        Some(d) => match NaiveDate::parse_from_str(d, "%Y-%m-%d") {
+            Ok(nd) => nd,
+            Err(_) => {
+                eprintln!("Invalid --date format: \"{d}\". Expected ISO 8601: YYYY-MM-DD (e.g. 2026-04-15)");
+                std::process::exit(1);
+            }
+        },
+        None => Local::now().date_naive(),
+    };
+
+    let naive_time = match time {
+        Some(t) => match NaiveTime::parse_from_str(t, "%H:%M:%S")
+            .or_else(|_| NaiveTime::parse_from_str(t, "%H:%M"))
+        {
+            Ok(nt) => nt,
+            Err(_) => {
+                eprintln!("Invalid --time format: \"{t}\". Expected ISO 8601: HH:MM or HH:MM:SS (e.g. 15:00)");
+                std::process::exit(1);
+            }
+        },
+        None => Local::now().time(),
+    };
+
+    let naive_dt = naive_date.and_time(naive_time);
+    let local_dt = match Local.from_local_datetime(&naive_dt).single() {
+        Some(dt) => dt,
+        None => {
+            eprintln!("Ambiguous or invalid local datetime: {naive_dt}");
+            std::process::exit(1);
+        }
+    };
+
+    Some(local_dt.with_timezone(&Utc))
 }
 
 fn cmd_add(input: &str) {
@@ -113,9 +163,9 @@ fn cmd_reset() {
     println!("Reset: removed {removed} custom timezone(s). Defaults restored (Local + UTC).");
 }
 
-fn cmd_tui() {
+fn cmd_tui(anchor: Option<DateTime<Utc>>) {
     let config = AppConfig::load();
-    let mut app = tui::App::new(config);
+    let mut app = tui::App::new(config, anchor);
     if let Err(e) = app.run() {
         eprintln!("TUI error: {e}");
         std::process::exit(1);

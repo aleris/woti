@@ -10,6 +10,8 @@ use clap::{Parser, Subcommand};
         Use subcommands to manage your timezone list.",
     after_help = "\x1b[1mExamples:\x1b[0m\n  \
         woti                        Launch the TUI\n  \
+        woti --date 2026-04-15      Launch pinned to a date\n  \
+        woti --time 15:00           Launch pinned to a time\n  \
         woti add PST                Add by timezone abbreviation\n  \
         woti add Bucharest          Add by city name\n  \
         woti add America/New_York   Add by IANA identifier\n  \
@@ -18,6 +20,14 @@ use clap::{Parser, Subcommand};
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
+
+    /// Pin the TUI to a specific date (ISO 8601: YYYY-MM-DD)
+    #[arg(long)]
+    pub date: Option<String>,
+
+    /// Pin the TUI to a specific time (ISO 8601: HH:MM or HH:MM:SS)
+    #[arg(long)]
+    pub time: Option<String>,
 }
 
 #[derive(Subcommand)]

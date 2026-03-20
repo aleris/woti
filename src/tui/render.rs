@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use chrono::{Datelike, Offset, Timelike, Utc};
+use chrono::{Datelike, Offset, Timelike};
 use chrono_tz::Tz;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -173,7 +173,7 @@ impl App {
     ) {
         let tz: Tz = entry.iana_id.parse().unwrap_or(chrono_tz::UTC);
 
-        let now_utc = Utc::now();
+        let now_utc = self.reference_time();
         let now_tz = now_utc.with_timezone(&tz);
         let current_hour = now_tz.hour() as i32;
 

@@ -1,6 +1,7 @@
 use std::io;
 use std::time::Instant;
 
+use chrono::{DateTime, Utc};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -14,6 +15,7 @@ use super::BLOCK_HEIGHT;
 
 pub struct App {
     pub(super) config: AppConfig,
+    pub(super) anchor_time: Option<DateTime<Utc>>,
     pub(super) hour_offset: i32,
     pub(super) scroll_offset: usize,
     pub(super) time_format: TimeFormat,
@@ -23,11 +25,12 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(config: AppConfig) -> Self {
+    pub fn new(config: AppConfig, anchor_time: Option<DateTime<Utc>>) -> Self {
         let time_format = config.time_format.unwrap_or(TimeFormat::Mixed);
         let shading_enabled = config.working_hours.enabled;
         Self {
             config,
+            anchor_time,
             hour_offset: 0,
             scroll_offset: 0,
             time_format,
@@ -35,6 +38,10 @@ impl App {
             should_quit: false,
             copied_at: None,
         }
+    }
+
+    pub(super) fn reference_time(&self) -> DateTime<Utc> {
+        self.anchor_time.unwrap_or_else(Utc::now)
     }
 
     pub(super) fn max_scroll(&self, body_height: u16) -> usize {

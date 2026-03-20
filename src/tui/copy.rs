@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use chrono::{Datelike, Offset, Timelike, Utc};
+use chrono::{Datelike, Offset, Timelike};
 use chrono_tz::Tz;
 
 use super::app::App;
@@ -16,7 +16,7 @@ impl App {
     }
 
     pub(super) fn build_copy_text(&self) -> String {
-        let now_utc = Utc::now();
+        let now_utc = self.reference_time();
         let mut lines = Vec::new();
         let mut ref_date: Option<chrono::NaiveDate> = None;
 
@@ -91,6 +91,7 @@ mod tests {
         };
         App {
             config,
+            anchor_time: None,
             hour_offset: 0,
             scroll_offset: 0,
             time_format: format,
@@ -297,6 +298,40 @@ mod tests {
             lines[1].contains(&format!(", January, {next_year}")),
             "should include month and year when year differs, got: {}",
             lines[1]
+        );
+    }
+
+    #[test]
+    fn anchor_time_pins_output() {
+        use chrono::{NaiveDate, TimeZone, Utc};
+
+        let anchor = NaiveDate::from_ymd_opt(2026, 7, 4)
+            .unwrap()
+            .and_hms_opt(12, 0, 0)
+            .unwrap();
+        let anchor_utc = Utc.from_utc_datetime(&anchor);
+
+        let config = AppConfig {
+            timezones: vec![entry("UTC", "UTC")],
+            time_format: Some(TimeFormat::H24),
+            working_hours: WorkingHoursConfig::default(),
+        };
+        let app = App {
+            config,
+            anchor_time: Some(anchor_utc),
+            hour_offset: 0,
+            scroll_offset: 0,
+            time_format: TimeFormat::H24,
+            shading_enabled: true,
+            should_quit: false,
+            copied_at: None,
+        };
+
+        let text = app.build_copy_text();
+        let line = text.lines().next().unwrap();
+        assert!(
+            line.contains("12:00"),
+            "anchored at 12:00 UTC should show 12:00, got: {line}"
         );
     }
 }
