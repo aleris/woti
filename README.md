@@ -42,6 +42,11 @@ Local and UTC are preconfigured by default. Configuration is stored in `~/.confi
 - `f`: cycle time format (mixed -> am/pm -> 24h → …)
 - `q` / `x` / `Esc`, `ctrl+c`: exit
 
+In **mixed** mode, 12h/24h is chosen per timezone based on the country's convention
+from [Unicode CLDR](https://cldr.unicode.org/) data, last updated on March 2026.
+This covers ~320 canonical IANA zones; legacy or uncommon aliases default to 24h. 
+Press `f` to override if the automatic choice doesn't match your preference — the setting is saved.
+
 ### Configuration
 
 The configuration is stored in a config file. 
