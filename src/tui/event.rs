@@ -103,6 +103,15 @@ impl App {
                                 terminal.draw(|f| self.render(f))?;
                                 last_render = Instant::now();
                             }
+                            (KeyCode::Char('w'), KeyModifiers::NONE) => {
+                                nav_start = None;
+                                nav_dir = 0;
+                                self.shading_enabled = !self.shading_enabled;
+                                self.config.working_hours.enabled = self.shading_enabled;
+                                let _ = self.config.save();
+                                terminal.draw(|f| self.render(f))?;
+                                last_render = Instant::now();
+                            }
                             _ => {
                                 nav_start = None;
                                 nav_dir = 0;

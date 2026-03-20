@@ -17,6 +17,7 @@ pub struct App {
     pub(super) hour_offset: i32,
     pub(super) scroll_offset: usize,
     pub(super) time_format: TimeFormat,
+    pub(super) shading_enabled: bool,
     pub(super) should_quit: bool,
     pub(super) copied_at: Option<Instant>,
 }
@@ -24,11 +25,13 @@ pub struct App {
 impl App {
     pub fn new(config: AppConfig) -> Self {
         let time_format = config.time_format.unwrap_or(TimeFormat::Mixed);
+        let shading_enabled = config.working_hours.enabled;
         Self {
             config,
             hour_offset: 0,
             scroll_offset: 0,
             time_format,
+            shading_enabled,
             should_quit: false,
             copied_at: None,
         }

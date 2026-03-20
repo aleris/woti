@@ -23,11 +23,15 @@ pub const SWITCHER_DIM_FG: Color = Color::Gray;
 pub const SWITCHER_SEP: Color = Color::Rgb(80, 80, 80);
 
 // -- Timeline --
-pub const SELECTED_FG: Color = Color::DarkGray;
+pub const SELECTED_FG: Color = Color::Black;
 pub const SELECTED_BG: Color = Color::Rgb(255, 255, 224);
 pub const LOCAL_BG: Color = Color::Rgb(50, 50, 50);
 pub const HOUR_FG: Color = Color::White;
-pub const AMPM_FG: Color = Color::DarkGray;
+pub const HOUR_FG_TRANSITION: Color = Color::Rgb(140, 140, 140);
+pub const HOUR_FG_NIGHT: Color = Color::Rgb(75, 75, 75);
+pub const AMPM_FG: Color = Color::Gray;
+pub const AMPM_FG_TRANSITION: Color = Color::Rgb(120, 120, 120);
+pub const AMPM_FG_NIGHT: Color = Color::Rgb(60, 60, 60);
 pub const DAY_LABEL: Color = Color::DarkGray;
 
 // -- Timezone info --

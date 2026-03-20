@@ -25,11 +25,47 @@ pub struct TimezoneEntry {
     pub is_default: bool,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct WorkingHoursConfig {
+    #[serde(default = "WorkingHoursConfig::default_enabled")]
+    pub enabled: bool,
+    #[serde(default = "WorkingHoursConfig::default_work_start")]
+    pub work_start: u8,
+    #[serde(default = "WorkingHoursConfig::default_work_end")]
+    pub work_end: u8,
+    #[serde(default = "WorkingHoursConfig::default_transition_start")]
+    pub transition_start: u8,
+    #[serde(default = "WorkingHoursConfig::default_transition_end")]
+    pub transition_end: u8,
+}
+
+impl Default for WorkingHoursConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            work_start: 9,
+            work_end: 18,
+            transition_start: 7,
+            transition_end: 20,
+        }
+    }
+}
+
+impl WorkingHoursConfig {
+    fn default_enabled() -> bool { true }
+    fn default_work_start() -> u8 { 9 }
+    fn default_work_end() -> u8 { 18 }
+    fn default_transition_start() -> u8 { 7 }
+    fn default_transition_end() -> u8 { 20 }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub timezones: Vec<TimezoneEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub time_format: Option<TimeFormat>,
+    #[serde(default)]
+    pub working_hours: WorkingHoursConfig,
 }
 
 impl Default for AppConfig {
@@ -37,12 +73,7 @@ impl Default for AppConfig {
         let local_iana = localtime_iana().unwrap_or_else(|| "UTC".to_string());
         let (city, region) = tz_data::city_and_region(&local_iana);
 
-        let mut timezones = vec![TimezoneEntry {
-            iana_id: local_iana.clone(),
-            city,
-            region,
-            is_default: true,
-        }];
+        let mut timezones = vec![];
 
         if local_iana != "UTC" {
             timezones.push(TimezoneEntry {
@@ -53,9 +84,17 @@ impl Default for AppConfig {
             });
         }
 
+        timezones.push(TimezoneEntry {
+            iana_id: local_iana.clone(),
+            city,
+            region,
+            is_default: true,
+        });
+
         Self {
             timezones,
             time_format: None,
+            working_hours: WorkingHoursConfig::default(),
         }
     }
 }
@@ -178,14 +217,14 @@ mod tests {
 
     #[test]
     fn has_iana_detects_existing() {
-        let mut config = AppConfig { timezones: vec![], time_format: None };
+        let mut config = AppConfig { timezones: vec![], time_format: None, working_hours: WorkingHoursConfig::default() };
         config.add(make_entry("America/Los_Angeles", "Los Angeles", false));
         assert!(config.has_iana("America/Los_Angeles"));
     }
 
     #[test]
     fn has_iana_returns_false_for_missing() {
-        let config = AppConfig { timezones: vec![], time_format: None };
+        let config = AppConfig { timezones: vec![], time_format: None, working_hours: WorkingHoursConfig::default() };
         assert!(!config.has_iana("America/Los_Angeles"));
     }
 
@@ -193,7 +232,7 @@ mod tests {
 
     #[test]
     fn remove_existing_entry() {
-        let mut config = AppConfig { timezones: vec![], time_format: None };
+        let mut config = AppConfig { timezones: vec![], time_format: None, working_hours: WorkingHoursConfig::default() };
         config.add(make_entry("Asia/Tokyo", "Tokyo", false));
         let removed = config.remove_by_iana("Asia/Tokyo");
         assert!(removed.is_some());
@@ -203,7 +242,7 @@ mod tests {
 
     #[test]
     fn remove_nonexistent_returns_none() {
-        let mut config = AppConfig { timezones: vec![], time_format: None };
+        let mut config = AppConfig { timezones: vec![], time_format: None, working_hours: WorkingHoursConfig::default() };
         assert!(config.remove_by_iana("Asia/Tokyo").is_none());
     }
 
@@ -211,7 +250,7 @@ mod tests {
 
     #[test]
     fn add_preserves_existing_entries() {
-        let mut config = AppConfig { timezones: vec![], time_format: None };
+        let mut config = AppConfig { timezones: vec![], time_format: None, working_hours: WorkingHoursConfig::default() };
         config.add(make_entry("UTC", "UTC", true));
         config.add(make_entry("America/Los_Angeles", "Los Angeles", false));
         assert_eq!(config.timezones.len(), 2);
@@ -223,7 +262,7 @@ mod tests {
 
     #[test]
     fn reset_removes_custom_timezones() {
-        let mut config = AppConfig { timezones: vec![], time_format: None };
+        let mut config = AppConfig { timezones: vec![], time_format: None, working_hours: WorkingHoursConfig::default() };
         config.add(make_entry("UTC", "UTC", true));
         config.add(make_entry("Europe/Bucharest", "Bucharest", true));
         config.add(make_entry("America/Los_Angeles", "Los Angeles", false));
@@ -240,7 +279,7 @@ mod tests {
 
     #[test]
     fn reset_with_only_defaults_returns_zero() {
-        let mut config = AppConfig { timezones: vec![], time_format: None };
+        let mut config = AppConfig { timezones: vec![], time_format: None, working_hours: WorkingHoursConfig::default() };
         config.add(make_entry("UTC", "UTC", true));
         config.add(make_entry("Europe/Bucharest", "Bucharest", true));
 
@@ -259,6 +298,7 @@ mod tests {
                 make_entry("America/New_York", "New York", false),
             ],
             time_format: None,
+            working_hours: WorkingHoursConfig::default(),
         };
         let toml_str = toml::to_string_pretty(&config).expect("serialize");
         let loaded: AppConfig = toml::from_str(&toml_str).expect("deserialize");
@@ -267,5 +307,63 @@ mod tests {
         assert!(loaded.timezones[0].is_default);
         assert_eq!(loaded.timezones[1].iana_id, "America/New_York");
         assert!(!loaded.timezones[1].is_default);
+    }
+
+    // --- Spec: "Configurable hour ranges" / "Shading enabled flag" ---
+
+    #[test]
+    fn working_hours_defaults_when_section_absent() {
+        let toml_str = r#"
+[[timezones]]
+iana_id = "UTC"
+city = "UTC"
+region = "Coordinated Universal Time"
+"#;
+        let loaded: AppConfig = toml::from_str(toml_str).expect("deserialize");
+        let wh = loaded.working_hours;
+        assert!(wh.enabled);
+        assert_eq!(wh.work_start, 9);
+        assert_eq!(wh.work_end, 18);
+        assert_eq!(wh.transition_start, 7);
+        assert_eq!(wh.transition_end, 20);
+    }
+
+    #[test]
+    fn working_hours_round_trip_with_custom_values() {
+        let config = AppConfig {
+            timezones: vec![make_entry("UTC", "UTC", true)],
+            time_format: None,
+            working_hours: WorkingHoursConfig {
+                enabled: false,
+                work_start: 8,
+                work_end: 17,
+                transition_start: 6,
+                transition_end: 19,
+            },
+        };
+        let toml_str = toml::to_string_pretty(&config).expect("serialize");
+        let loaded: AppConfig = toml::from_str(&toml_str).expect("deserialize");
+        assert!(!loaded.working_hours.enabled);
+        assert_eq!(loaded.working_hours.work_start, 8);
+        assert_eq!(loaded.working_hours.work_end, 17);
+        assert_eq!(loaded.working_hours.transition_start, 6);
+        assert_eq!(loaded.working_hours.transition_end, 19);
+    }
+
+    #[test]
+    fn working_hours_partial_fields_use_defaults() {
+        let toml_str = r#"
+[[timezones]]
+iana_id = "UTC"
+city = "UTC"
+region = "Coordinated Universal Time"
+
+[working_hours]
+enabled = false
+"#;
+        let loaded: AppConfig = toml::from_str(toml_str).expect("deserialize");
+        assert!(!loaded.working_hours.enabled);
+        assert_eq!(loaded.working_hours.work_start, 9);
+        assert_eq!(loaded.working_hours.work_end, 18);
     }
 }

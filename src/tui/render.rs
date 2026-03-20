@@ -3,12 +3,12 @@ use std::time::Duration;
 use chrono::{Datelike, Offset, Timelike, Utc};
 use chrono_tz::Tz;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Padding, Paragraph};
 use ratatui::Frame;
 
-use crate::config::TimeFormat;
+use crate::config::{TimeFormat, WorkingHoursConfig};
 
 use super::app::App;
 use super::theme;
@@ -94,7 +94,15 @@ impl App {
         let dim = Style::default().fg(theme::SWITCHER_DIM_FG);
         let sep = Style::default().fg(theme::SWITCHER_SEP);
 
+        let shade_label_style = if self.shading_enabled {
+            Style::default().fg(Color::White)
+        } else {
+            Style::default().fg(theme::HOUR_FG_TRANSITION)
+        };
+
         let fmt_switcher: Vec<Span> = vec![
+            Span::styled(" w ", key_on),
+            Span::styled(" Shade ", shade_label_style),
             Span::styled(" f ", key_on),
             Span::raw(" "),
             Span::styled(
@@ -201,6 +209,12 @@ impl App {
         let utc_secs = now_tz.offset().fix().local_minus_utc();
         let offset_m = (utc_secs.abs() % 3600) / 60;
 
+        let shading = if self.shading_enabled {
+            Some(self.config.working_hours)
+        } else {
+            None
+        };
+
         let tl = TimelineParams {
             start_hour,
             base_hour,
@@ -212,6 +226,7 @@ impl App {
             offset_m,
             tz,
             now_tz,
+            shading,
         };
 
         let hour_spans = build_hour_spans(&tl);
@@ -250,6 +265,7 @@ struct TimelineParams {
     offset_m: i32,
     tz: Tz,
     now_tz: chrono::DateTime<Tz>,
+    shading: Option<WorkingHoursConfig>,
 }
 
 fn selected_style() -> Style {
@@ -261,6 +277,28 @@ fn selected_style() -> Style {
 
 fn local_style() -> Style {
     Style::default().bg(theme::LOCAL_BG)
+}
+
+fn hour_fg_color(hour_in_day: i32, wh: &WorkingHoursConfig) -> Color {
+    let h = hour_in_day as u8;
+    if h >= wh.work_start && h < wh.work_end {
+        theme::HOUR_FG
+    } else if h >= wh.transition_start && h < wh.transition_end {
+        theme::HOUR_FG_TRANSITION
+    } else {
+        theme::HOUR_FG_NIGHT
+    }
+}
+
+fn ampm_fg_color(hour_in_day: i32, wh: &WorkingHoursConfig) -> Color {
+    let h = hour_in_day as u8;
+    if h >= wh.work_start && h < wh.work_end {
+        theme::AMPM_FG
+    } else if h >= wh.transition_start && h < wh.transition_end {
+        theme::AMPM_FG_TRANSITION
+    } else {
+        theme::AMPM_FG_NIGHT
+    }
 }
 
 fn build_hour_spans(p: &TimelineParams) -> Vec<Span<'static>> {
@@ -279,12 +317,17 @@ fn build_hour_spans(p: &TimelineParams) -> Vec<Span<'static>> {
             format!("{:>2}", h12)
         };
 
+        let fg = match &p.shading {
+            Some(wh) => hour_fg_color(hour_in_day, wh),
+            None => theme::HOUR_FG,
+        };
+
         let style = if is_selected {
             selected_style()
         } else if is_local {
             local_style().fg(theme::HOUR_FG)
         } else {
-            Style::default().fg(theme::HOUR_FG)
+            Style::default().fg(fg)
         };
 
         spans.push(Span::raw(" "));
@@ -318,13 +361,18 @@ fn build_ampm_spans(p: &TimelineParams) -> Vec<Span<'static>> {
         let is_local = h == p.current_hour && p.hour_offset != 0;
 
         let (text, style) = if !p.use_24h {
+            let fg = match &p.shading {
+                Some(wh) => ampm_fg_color(hour_in_day, wh),
+                None => theme::AMPM_FG,
+            };
+
             let style = if is_selected {
                 selected_style()
             } else if is_local {
                 local_style().fg(theme::AMPM_FG)
             } else {
                 Style::default()
-                    .fg(theme::AMPM_FG)
+                    .fg(fg)
                     .add_modifier(Modifier::DIM)
             };
 
@@ -504,6 +552,7 @@ mod tests {
             offset_m: 0,
             tz,
             now_tz,
+            shading: None,
         }
     }
 
@@ -555,6 +604,7 @@ mod tests {
             offset_m: 0,
             tz,
             now_tz,
+            shading: None,
         };
         let spans = build_day_spans(&p);
         let text = spans_to_string(&spans);
@@ -584,6 +634,7 @@ mod tests {
             offset_m: 0,
             tz,
             now_tz,
+            shading: None,
         };
         let spans = build_day_spans(&p);
         let text = spans_to_string(&spans);
@@ -629,6 +680,7 @@ mod tests {
             offset_m: 0,
             tz,
             now_tz,
+            shading: None,
         };
         let spans = build_day_spans(&p);
         let sel_text = selected_bg_text(&spans);
@@ -654,6 +706,7 @@ mod tests {
             offset_m: 0,
             tz,
             now_tz,
+            shading: None,
         };
         let spans = build_day_spans(&p);
         let sel_text = selected_bg_text(&spans);
@@ -661,5 +714,46 @@ mod tests {
             sel_text.contains("WED 1, April"),
             "selection at month-boundary midnight should highlight full label including month, got: '{sel_text}'"
         );
+    }
+
+    // --- Spec: "Three-tier hour shading" ---
+
+    #[test]
+    fn hour_fg_working_hours() {
+        let wh = WorkingHoursConfig::default();
+        assert_eq!(hour_fg_color(9, &wh), theme::HOUR_FG);
+        assert_eq!(hour_fg_color(12, &wh), theme::HOUR_FG);
+        assert_eq!(hour_fg_color(17, &wh), theme::HOUR_FG);
+    }
+
+    #[test]
+    fn hour_fg_transition_hours() {
+        let wh = WorkingHoursConfig::default();
+        assert_eq!(hour_fg_color(7, &wh), theme::HOUR_FG_TRANSITION);
+        assert_eq!(hour_fg_color(8, &wh), theme::HOUR_FG_TRANSITION);
+        assert_eq!(hour_fg_color(18, &wh), theme::HOUR_FG_TRANSITION);
+        assert_eq!(hour_fg_color(19, &wh), theme::HOUR_FG_TRANSITION);
+    }
+
+    #[test]
+    fn hour_fg_night_hours() {
+        let wh = WorkingHoursConfig::default();
+        assert_eq!(hour_fg_color(0, &wh), theme::HOUR_FG_NIGHT);
+        assert_eq!(hour_fg_color(2, &wh), theme::HOUR_FG_NIGHT);
+        assert_eq!(hour_fg_color(6, &wh), theme::HOUR_FG_NIGHT);
+        assert_eq!(hour_fg_color(20, &wh), theme::HOUR_FG_NIGHT);
+        assert_eq!(hour_fg_color(23, &wh), theme::HOUR_FG_NIGHT);
+    }
+
+    #[test]
+    fn hour_fg_boundaries() {
+        let wh = WorkingHoursConfig::default();
+        assert_eq!(hour_fg_color(6, &wh), theme::HOUR_FG_NIGHT, "hour 6 should be night");
+        assert_eq!(hour_fg_color(7, &wh), theme::HOUR_FG_TRANSITION, "hour 7 should be transition");
+        assert_eq!(hour_fg_color(9, &wh), theme::HOUR_FG, "hour 9 should be working");
+        assert_eq!(hour_fg_color(17, &wh), theme::HOUR_FG, "hour 17 should be working");
+        assert_eq!(hour_fg_color(18, &wh), theme::HOUR_FG_TRANSITION, "hour 18 should be transition");
+        assert_eq!(hour_fg_color(19, &wh), theme::HOUR_FG_TRANSITION, "hour 19 should be transition");
+        assert_eq!(hour_fg_color(20, &wh), theme::HOUR_FG_NIGHT, "hour 20 should be night");
     }
 }

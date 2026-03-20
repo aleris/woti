@@ -80,19 +80,21 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::{AppConfig, TimeFormat, TimezoneEntry};
+    use crate::config::{AppConfig, TimeFormat, TimezoneEntry, WorkingHoursConfig};
     use super::super::app::App;
 
     fn app_with(entries: Vec<TimezoneEntry>, format: TimeFormat) -> App {
         let config = AppConfig {
             timezones: entries,
             time_format: Some(format),
+            working_hours: WorkingHoursConfig::default(),
         };
         App {
             config,
             hour_offset: 0,
             scroll_offset: 0,
             time_format: format,
+            shading_enabled: true,
             should_quit: false,
             copied_at: None,
         }
