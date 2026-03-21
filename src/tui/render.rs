@@ -14,7 +14,7 @@ use super::app::App;
 use super::theme;
 use super::{BLOCK_HEIGHT, CELL_WIDTH, INFO_COL_WIDTH, TIMELINE_GAP};
 
-pub(super) fn compute_datetime_for_hour(
+pub fn compute_datetime_for_hour(
     _tz: Tz,
     now_tz: chrono::DateTime<Tz>,
     offset_from_current: i32,

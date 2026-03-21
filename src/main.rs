@@ -27,6 +27,10 @@ fn main() {
                 cmd_remove(&zone.join(" "));
             }
         }
+        Some(Command::Print { date, time }) => {
+            let anchor = parse_anchor(date.as_deref(), time.as_deref());
+            cmd_print(anchor);
+        }
         None => {
             let anchor = parse_anchor(cli.date.as_deref(), cli.time.as_deref());
             cmd_tui(anchor);
@@ -161,6 +165,19 @@ fn cmd_reset() {
         std::process::exit(1);
     }
     println!("Reset: removed {removed} custom timezone(s). Defaults restored (Local + UTC).");
+}
+
+fn cmd_print(anchor: Option<DateTime<Utc>>) {
+    let config = AppConfig::load();
+    let time_format = config.time_format.unwrap_or(config::TimeFormat::Mixed);
+    let reference_utc = anchor.unwrap_or_else(Utc::now);
+    let text = tui::build_copy_text(
+        &config.timezones,
+        reference_utc,
+        0,
+        &|iana_id| tui::use_24h_for_format(time_format, iana_id),
+    );
+    println!("{text}");
 }
 
 fn cmd_tui(anchor: Option<DateTime<Utc>>) {

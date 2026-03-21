@@ -1,6 +1,6 @@
 [package]
 name = "woti"
-version = "0.26.0"
+version = "0.27.0"
 edition = "2024"
 description = "World time in your terminal — see current times across time zones at a glance"
 

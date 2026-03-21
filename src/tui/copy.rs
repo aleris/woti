@@ -1,10 +1,78 @@
 use std::time::Instant;
 
-use chrono::{Datelike, Offset, Timelike};
+use chrono::{DateTime, Datelike, Offset, Timelike, Utc};
 use chrono_tz::Tz;
+
+use crate::config::TimezoneEntry;
 
 use super::app::App;
 use super::render::compute_datetime_for_hour;
+
+pub fn build_copy_text(
+    timezones: &[TimezoneEntry],
+    reference_utc: DateTime<Utc>,
+    hour_offset: i32,
+    use_24h_for_tz: &dyn Fn(&str) -> bool,
+) -> String {
+    let mut lines = Vec::new();
+    let mut ref_date: Option<chrono::NaiveDate> = None;
+
+    for entry in timezones {
+        let tz: Tz = entry.iana_id.parse().unwrap_or(chrono_tz::UTC);
+        let now_tz = reference_utc.with_timezone(&tz);
+        let selected_dt = compute_datetime_for_hour(tz, now_tz, hour_offset);
+
+        let tz_abbr = selected_dt.format("%Z").to_string();
+        let hour_in_day = selected_dt.hour();
+        let offset_m = (selected_dt.offset().fix().local_minus_utc().abs() % 3600) / 60;
+
+        let use_24h = use_24h_for_tz(&entry.iana_id);
+        let time_str = if use_24h {
+            format!("{:02}:{:02}", hour_in_day, offset_m)
+        } else {
+            let h12 = hour_in_day % 12;
+            let h12 = if h12 == 0 { 12 } else { h12 };
+            let ampm = if hour_in_day < 12 { "am" } else { "pm" };
+            if offset_m != 0 {
+                format!("{}:{:02}{}", h12, offset_m, ampm)
+            } else {
+                format!("{}{}", h12, ampm)
+            }
+        };
+
+        let date = selected_dt.date_naive();
+        let day_suffix = match ref_date {
+            None => {
+                ref_date = Some(date);
+                String::new()
+            }
+            Some(ref_d) if date != ref_d => {
+                let mut suffix = format!(
+                    " {} {}",
+                    selected_dt.format("%a").to_string().to_uppercase(),
+                    selected_dt.day()
+                );
+                if date.month() != ref_d.month() || date.year() != ref_d.year() {
+                    suffix.push_str(&format!(", {}", selected_dt.format("%B")));
+                    if date.year() != ref_d.year() {
+                        suffix.push_str(&format!(", {}", selected_dt.format("%Y")));
+                    }
+                }
+                suffix
+            }
+            _ => String::new(),
+        };
+
+        let label = if entry.city == tz_abbr {
+            entry.city.clone()
+        } else {
+            format!("{} / {}", entry.city, tz_abbr)
+        };
+        lines.push(format!("{} {}{}", label, time_str, day_suffix));
+    }
+
+    lines.join("\n")
+}
 
 impl App {
     pub(super) fn copy_selection(&mut self) {
@@ -16,65 +84,14 @@ impl App {
     }
 
     pub(super) fn build_copy_text(&self) -> String {
-        let now_utc = self.reference_time();
-        let mut lines = Vec::new();
-        let mut ref_date: Option<chrono::NaiveDate> = None;
-
-        for entry in &self.config.timezones {
-            let tz: Tz = entry.iana_id.parse().unwrap_or(chrono_tz::UTC);
-            let now_tz = now_utc.with_timezone(&tz);
-            let selected_dt = compute_datetime_for_hour(tz, now_tz, self.hour_offset);
-
-            let tz_abbr = selected_dt.format("%Z").to_string();
-            let hour_in_day = selected_dt.hour();
-            let offset_m = (selected_dt.offset().fix().local_minus_utc().abs() % 3600) / 60;
-
-            let use_24h = self.use_24h_for_tz(&entry.iana_id);
-            let time_str = if use_24h {
-                format!("{:02}:{:02}", hour_in_day, offset_m)
-            } else {
-                let h12 = hour_in_day % 12;
-                let h12 = if h12 == 0 { 12 } else { h12 };
-                let ampm = if hour_in_day < 12 { "am" } else { "pm" };
-                if offset_m != 0 {
-                    format!("{}:{:02}{}", h12, offset_m, ampm)
-                } else {
-                    format!("{}{}", h12, ampm)
-                }
-            };
-
-            let date = selected_dt.date_naive();
-            let day_suffix = match ref_date {
-                None => {
-                    ref_date = Some(date);
-                    String::new()
-                }
-                Some(ref_d) if date != ref_d => {
-                    let mut suffix = format!(
-                        " {} {}",
-                        selected_dt.format("%a").to_string().to_uppercase(),
-                        selected_dt.day()
-                    );
-                    if date.month() != ref_d.month() || date.year() != ref_d.year() {
-                        suffix.push_str(&format!(", {}", selected_dt.format("%B")));
-                        if date.year() != ref_d.year() {
-                            suffix.push_str(&format!(", {}", selected_dt.format("%Y")));
-                        }
-                    }
-                    suffix
-                }
-                _ => String::new(),
-            };
-
-            let label = if entry.city == tz_abbr {
-                entry.city.clone()
-            } else {
-                format!("{} / {}", entry.city, tz_abbr)
-            };
-            lines.push(format!("{} {}{}", label, time_str, day_suffix));
-        }
-
-        lines.join("\n")
+        let reference_utc = self.reference_time();
+        let time_format = self.time_format;
+        build_copy_text(
+            &self.config.timezones,
+            reference_utc,
+            self.hour_offset,
+            &|iana_id| Self::use_24h_static(time_format, iana_id),
+        )
     }
 }
 
@@ -332,6 +349,63 @@ mod tests {
         assert!(
             line.contains("12:00"),
             "anchored at 12:00 UTC should show 12:00, got: {line}"
+        );
+    }
+
+    #[test]
+    fn standalone_matches_app_wrapper() {
+        use chrono::{NaiveDate, TimeZone, Utc};
+        use super::build_copy_text;
+
+        let anchor = NaiveDate::from_ymd_opt(2026, 7, 4)
+            .unwrap()
+            .and_hms_opt(12, 0, 0)
+            .unwrap();
+        let anchor_utc = Utc.from_utc_datetime(&anchor);
+
+        let entries = vec![
+            entry("UTC", "UTC"),
+            entry("Asia/Kolkata", "Bangalore"),
+            entry("America/Los_Angeles", "San Jose"),
+        ];
+        let config = AppConfig {
+            timezones: entries.clone(),
+            time_format: Some(TimeFormat::H24),
+            working_hours: WorkingHoursConfig::default(),
+        };
+        let app = App {
+            config,
+            anchor_time: Some(anchor_utc),
+            hour_offset: 0,
+            scroll_offset: 0,
+            time_format: TimeFormat::H24,
+            shading_enabled: true,
+            should_quit: false,
+            copied_at: None,
+        };
+
+        let from_app = app.build_copy_text();
+        let from_standalone = build_copy_text(&entries, anchor_utc, 0, &|_| true);
+
+        assert_eq!(from_app, from_standalone);
+    }
+
+    #[test]
+    fn standalone_with_pinned_time() {
+        use chrono::{NaiveDate, TimeZone, Utc};
+        use super::build_copy_text;
+
+        let anchor = NaiveDate::from_ymd_opt(2026, 4, 15)
+            .unwrap()
+            .and_hms_opt(14, 0, 0)
+            .unwrap();
+        let anchor_utc = Utc.from_utc_datetime(&anchor);
+
+        let entries = vec![entry("UTC", "UTC")];
+        let text = build_copy_text(&entries, anchor_utc, 0, &|_| true);
+        assert!(
+            text.contains("14:00"),
+            "pinned at 14:00 UTC should show 14:00, got: {text}"
         );
     }
 }

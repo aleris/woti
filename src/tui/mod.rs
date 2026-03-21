@@ -6,6 +6,8 @@ mod theme;
 mod time_format;
 
 pub use app::App;
+pub use copy::build_copy_text;
+pub use time_format::use_24h_for_format;
 
 const CELL_WIDTH: u16 = 3;
 const INFO_COL_WIDTH: u16 = 40;
