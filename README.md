@@ -58,7 +58,7 @@ Press `f` to override if the automatic choice doesn't match your preference - th
 
 ### Print to console
 
-To print the time with all zones to console:
+To print the time with all your zones to console:
 
 ```sh
 woti print # prints for current time
