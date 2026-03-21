@@ -163,6 +163,25 @@ impl App {
             self.render_timezone_block(frame, rect, &self.config.timezones[i]);
             y += BLOCK_HEIGHT;
         }
+
+        if self.hour_offset != 0 && y < y_end {
+            let label = format_hour_offset(self.hour_offset);
+            let inner_width = area.width.saturating_sub(2);
+            let info_w = (INFO_COL_WIDTH.min(inner_width)) as usize;
+            let left_pad = info_w + TIMELINE_GAP as usize;
+            let timeline_avail = inner_width.saturating_sub(left_pad as u16);
+            let num_cells = (timeline_avail / CELL_WIDTH) as i32;
+            let selected_cell = num_cells / 2;
+            let x_offset =
+                1 + left_pad + (selected_cell as usize) * (CELL_WIDTH as usize) + 1;
+
+            let line = Line::from(vec![
+                Span::raw(" ".repeat(x_offset)),
+                Span::styled(label, selected_style()),
+            ]);
+            let rect = Rect::new(area.x, y, area.width, 1);
+            frame.render_widget(Paragraph::new(line), rect);
+        }
     }
 
     fn render_timezone_block(
@@ -535,6 +554,16 @@ fn build_info_line<'a>(
     ]
 }
 
+fn format_hour_offset(offset: i32) -> String {
+    match offset {
+        0 => String::new(),
+        1 => "in 1 hour".to_string(),
+        -1 => "1 hour ago".to_string(),
+        n if n > 0 => format!("in {} hours", n),
+        n => format!("{} hours ago", n.abs()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -757,5 +786,38 @@ mod tests {
         assert_eq!(hour_fg_color(18, &wh), theme::HOUR_FG_TRANSITION, "hour 18 should be transition");
         assert_eq!(hour_fg_color(19, &wh), theme::HOUR_FG_TRANSITION, "hour 19 should be transition");
         assert_eq!(hour_fg_color(20, &wh), theme::HOUR_FG_NIGHT, "hour 20 should be night");
+    }
+
+    #[test]
+    fn format_hour_offset_zero_is_empty() {
+        assert_eq!(format_hour_offset(0), "");
+    }
+
+    #[test]
+    fn format_hour_offset_positive_singular() {
+        assert_eq!(format_hour_offset(1), "in 1 hour");
+    }
+
+    #[test]
+    fn format_hour_offset_negative_singular() {
+        assert_eq!(format_hour_offset(-1), "1 hour ago");
+    }
+
+    #[test]
+    fn format_hour_offset_positive_plural() {
+        assert_eq!(format_hour_offset(2), "in 2 hours");
+        assert_eq!(format_hour_offset(5), "in 5 hours");
+    }
+
+    #[test]
+    fn format_hour_offset_negative_plural() {
+        assert_eq!(format_hour_offset(-3), "3 hours ago");
+        assert_eq!(format_hour_offset(-12), "12 hours ago");
+    }
+
+    #[test]
+    fn format_hour_offset_large_values() {
+        assert_eq!(format_hour_offset(100), "in 100 hours");
+        assert_eq!(format_hour_offset(-48), "48 hours ago");
     }
 }
