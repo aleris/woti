@@ -6,13 +6,13 @@ World time in your terminal - see current times across time zones at a glance.
 
 ## Install
 
-```
+```sh
 curl -fsSL https://raw.githubusercontent.com/aleris/woti/main/scripts/install.sh | sh
 ```
 
 To install a specific version:
 
-```
+```sh
 curl -fsSL https://raw.githubusercontent.com/aleris/woti/main/scripts/install.sh | sh -s -- --version v0.29.0
 ```
 
@@ -24,16 +24,16 @@ The binary is installed to `~/.local/bin`.
 
 ## Usage
 
-```
-woti                        Launch the TUI
+```sh
+woti                        # Launch the TUI
 
-woti add PST                Add by timezone abbreviation (PST, EET, CET, CST, EST, etc.) (*)
-woti add Bucharest          Add by city name
-woti add America/New_York   Add by IANA identifier in tz database (**)
-woti add San Jose           Add by city name that is not in IANA (***)
-woti remove PST             Remove a timezone
+woti add PST                # Add by timezone abbreviation (PST, EET, CET, CST, EST, etc.) (*)
+woti add Bucharest          # Add by city name
+woti add America/New_York   # Add by IANA identifier in tz database (**)
+woti add San Jose           # Add by city name that is not in IANA (***)
+woti remove PST             # Remove a timezone
 
-woti --help                 Show help
+woti --help                 # Show help
 ```
 
 <sup>(\*)</sup> [List of time zone abbreviations](https://en.wikipedia.org/wiki/List_of_time_zone_abbreviations)
@@ -80,10 +80,10 @@ The output is the same as for copy from TUI, just printed to stdout directly. It
 By default, the TUI shows the current live time. Use `--date` and `--time` to pin the display
 to a specific point in time (ISO 8601 format, interpreted in your local timezone):
 
-```
-woti --date 2026-04-15              Launch pinned to April 15, current time
-woti --time 09:30                   Today at 09:30
-woti --date 2026-04-15 --time 14:00 April 15 at 2pm
+```sh
+woti --date 2026-04-15               # Launch pinned to April 15, current time
+woti --time 09:30                    # Today at 09:30
+woti --date 2026-04-15 --time 14:00  # April 15 at 2pm
 ```
 
 When pinned, the clock does not advance - the displayed time stays fixed. 
