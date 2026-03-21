@@ -13,12 +13,14 @@ curl -fsSL https://raw.githubusercontent.com/aleris/woti/main/scripts/install.sh
 To install a specific version:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/aleris/woti/main/scripts/install.sh | sh -s -- --version v0.3.0
+curl -fsSL https://raw.githubusercontent.com/aleris/woti/main/scripts/install.sh | sh -s -- --version v0.29.0
 ```
+
+Or download it from [releases](https://github.com/aleris/woti/releases).
 
 Supported platforms: macOS (Apple Silicon, Intel) and Linux (x86_64, aarch64).
 
-The binary is installed to `~/.local/bin` (or `/usr/local/bin` when run as root).
+The binary is installed to `~/.local/bin`.
 
 ## Usage
 
@@ -56,7 +58,7 @@ Press `f` to override if the automatic choice doesn't match your preference - th
 
 ### Print to console
 
-To quickly print the time with all zones:
+To print the time with all zones to console:
 
 ```sh
 woti print # prints for current time
@@ -66,7 +68,12 @@ woti print --date 2026-03-20 --time 19:00 # prints for 7 pm on March 20, 2026
 ```
 
 The input format is ISO date and time.
-The output is the same as for copy from TUI, just printed to stdout directly. 
+
+The output is the same as for copy from TUI, just printed to stdout directly. It prints something like:
+> UTC 17:00<br/>
+> Bucharest / EET 19:00<br/>
+> San Jose / PDT 10am<br/>
+> Bangalore / IST 10:30pm<br/>
 
 ### Pinning date & time in TUI
 
