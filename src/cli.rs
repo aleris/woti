@@ -5,19 +5,21 @@ use clap::{Parser, Subcommand};
     name = "woti",
     version,
     about = "World time in your terminal",
-    long_about = "World time in your terminal — see current times across time zones at a glance.\n\n\
+    long_about = "World time in your terminal - see current times across time zones at a glance.\n\n\
         Run with no arguments to launch the interactive TUI.\n\
         Use subcommands to manage your timezone list.",
     after_help = "\x1b[1mExamples:\x1b[0m\n  \
-        woti                        Launch the TUI\n  \
-        woti --date 2026-04-15      Launch pinned to a date\n  \
-        woti --time 15:00           Launch pinned to a time\n  \
-        woti print                  Print times to stdout\n  \
-        woti print --time 15:00     Print times pinned to a time\n  \
-        woti add PST                Add by timezone abbreviation\n  \
-        woti add Bucharest          Add by city name\n  \
-        woti add America/New_York   Add by IANA identifier\n  \
-        woti remove PST             Remove a timezone"
+        woti                                          Launch the TUI\n  \
+        woti --date 2026-04-15                        Launch pinned to a date, use current time\n  \
+        woti --time 15:00                             Launch pinned to a time, use current date\n  \
+        woti --date 2026-04-15 --time 19:00           Launch pinned to a specific date time\n  \
+        woti print                                    Print times to stdout\n  \
+        woti print --time 15:00                       Print times pinned to a time\n  \
+        woti print --date 2026-03-20 --time 19:00     Print times pinned to a date and time\n  \
+        woti add PST                                  Add by timezone abbreviation\n  \
+        woti add Bucharest                            Add by city name\n  \
+        woti add America/New_York                     Add by IANA identifier\n  \
+        woti remove PST                               Remove a timezone"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -72,7 +74,7 @@ pub enum Command {
             woti remove PST\n  \
             woti remove Bucharest\n  \
             woti remove America/New_York\n  \
-            woti remove --reset           Remove all custom timezones"
+            woti remove --reset           Remove all timezones and resets to UTC + local"
     )]
     Remove {
         /// Remove all custom timezones and restore defaults (Local + UTC)
