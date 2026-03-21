@@ -99,101 +99,118 @@ pub fn lookup_abbreviation(abbr: &str) -> Option<ResolvedTz> {
 // City aliases: common names that don't appear in IANA zone paths
 // ---------------------------------------------------------------------------
 
-struct CityAlias {
-    name: &'static str,
-    iana_id: &'static str,
-    display_city: &'static str,
-    display_region: &'static str,
-}
-
 static CITY_ALIASES: &[CityAlias] = &[
-    // North America - cities sharing a zone with a different IANA city name
-    CityAlias { name: "san jose",        iana_id: "America/Los_Angeles", display_city: "San Jose",       display_region: "United States, California" },
-    CityAlias { name: "san francisco",   iana_id: "America/Los_Angeles", display_city: "San Francisco",  display_region: "United States, California" },
-    CityAlias { name: "san diego",       iana_id: "America/Los_Angeles", display_city: "San Diego",      display_region: "United States, California" },
-    CityAlias { name: "seattle",         iana_id: "America/Los_Angeles", display_city: "Seattle",        display_region: "United States, Washington" },
-    CityAlias { name: "portland",        iana_id: "America/Los_Angeles", display_city: "Portland",       display_region: "United States, Oregon" },
-    CityAlias { name: "las vegas",       iana_id: "America/Los_Angeles", display_city: "Las Vegas",      display_region: "United States, Nevada" },
-    CityAlias { name: "dallas",          iana_id: "America/Chicago",     display_city: "Dallas",         display_region: "United States, Texas" },
-    CityAlias { name: "houston",         iana_id: "America/Chicago",     display_city: "Houston",        display_region: "United States, Texas" },
-    CityAlias { name: "austin",          iana_id: "America/Chicago",     display_city: "Austin",         display_region: "United States, Texas" },
-    CityAlias { name: "minneapolis",     iana_id: "America/Chicago",     display_city: "Minneapolis",    display_region: "United States, Minnesota" },
-    CityAlias { name: "atlanta",         iana_id: "America/New_York",    display_city: "Atlanta",        display_region: "United States, Georgia" },
-    CityAlias { name: "miami",           iana_id: "America/New_York",    display_city: "Miami",          display_region: "United States, Florida" },
-    CityAlias { name: "boston",           iana_id: "America/New_York",    display_city: "Boston",         display_region: "United States, Massachusetts" },
-    CityAlias { name: "washington",      iana_id: "America/New_York",    display_city: "Washington",     display_region: "United States, D.C." },
-    CityAlias { name: "philadelphia",    iana_id: "America/New_York",    display_city: "Philadelphia",   display_region: "United States, Pennsylvania" },
-    CityAlias { name: "salt lake city",  iana_id: "America/Denver",      display_city: "Salt Lake City", display_region: "United States, Utah" },
-    CityAlias { name: "ottawa",          iana_id: "America/Toronto",     display_city: "Ottawa",         display_region: "Canada, Ontario" },
-    CityAlias { name: "montreal",        iana_id: "America/Toronto",     display_city: "Montreal",       display_region: "Canada, Quebec" },
-    CityAlias { name: "calgary",         iana_id: "America/Edmonton",    display_city: "Calgary",        display_region: "Canada, Alberta" },
-    CityAlias { name: "guadalajara",     iana_id: "America/Mexico_City", display_city: "Guadalajara",    display_region: "Mexico" },
+    // ── North America — overrides (city is in a different state than the IANA ref) ──
+    CityAlias { name: "seattle",          iana_id: "America/Los_Angeles", display_city: "Seattle",        region_override: Some("United States, Washington") },
+    CityAlias { name: "portland",         iana_id: "America/Los_Angeles", display_city: "Portland",       region_override: Some("United States, Oregon") },
+    CityAlias { name: "las vegas",        iana_id: "America/Los_Angeles", display_city: "Las Vegas",      region_override: Some("United States, Nevada") },
+    CityAlias { name: "dallas",           iana_id: "America/Chicago",     display_city: "Dallas",         region_override: Some("United States, Texas") },
+    CityAlias { name: "houston",          iana_id: "America/Chicago",     display_city: "Houston",        region_override: Some("United States, Texas") },
+    CityAlias { name: "austin",           iana_id: "America/Chicago",     display_city: "Austin",         region_override: Some("United States, Texas") },
+    CityAlias { name: "minneapolis",      iana_id: "America/Chicago",     display_city: "Minneapolis",    region_override: Some("United States, Minnesota") },
+    CityAlias { name: "atlanta",          iana_id: "America/New_York",    display_city: "Atlanta",        region_override: Some("United States, Georgia") },
+    CityAlias { name: "miami",            iana_id: "America/New_York",    display_city: "Miami",          region_override: Some("United States, Florida") },
+    CityAlias { name: "boston",            iana_id: "America/New_York",    display_city: "Boston",         region_override: Some("United States, Massachusetts") },
+    CityAlias { name: "washington",       iana_id: "America/New_York",    display_city: "Washington",     region_override: Some("United States, D.C.") },
+    CityAlias { name: "philadelphia",     iana_id: "America/New_York",    display_city: "Philadelphia",   region_override: Some("United States, Pennsylvania") },
+    CityAlias { name: "salt lake city",   iana_id: "America/Denver",      display_city: "Salt Lake City", region_override: Some("United States, Utah") },
+    CityAlias { name: "montreal",         iana_id: "America/Toronto",     display_city: "Montreal",       region_override: Some("Canada, Quebec") },
 
-    // South America
-    CityAlias { name: "rio de janeiro",  iana_id: "America/Sao_Paulo",   display_city: "Rio de Janeiro", display_region: "Brazil" },
-    CityAlias { name: "brasilia",        iana_id: "America/Sao_Paulo",   display_city: "Brasilia",       display_region: "Brazil" },
-    CityAlias { name: "medellin",        iana_id: "America/Bogota",      display_city: "Medellin",       display_region: "Colombia" },
-    CityAlias { name: "quito",           iana_id: "America/Guayaquil",   display_city: "Quito",          display_region: "Ecuador" },
+    // ── North America — region from REGION_NAMES ──
+    CityAlias { name: "san jose",         iana_id: "America/Los_Angeles", display_city: "San Jose",       region_override: None },
+    CityAlias { name: "san francisco",    iana_id: "America/Los_Angeles", display_city: "San Francisco",  region_override: None },
+    CityAlias { name: "san diego",        iana_id: "America/Los_Angeles", display_city: "San Diego",      region_override: None },
+    CityAlias { name: "ottawa",           iana_id: "America/Toronto",     display_city: "Ottawa",         region_override: None },
+    CityAlias { name: "calgary",          iana_id: "America/Edmonton",    display_city: "Calgary",        region_override: None },
+    CityAlias { name: "guadalajara",      iana_id: "America/Mexico_City", display_city: "Guadalajara",    region_override: None },
 
-    // Europe
-    CityAlias { name: "munich",          iana_id: "Europe/Berlin",       display_city: "Munich",         display_region: "Germany" },
-    CityAlias { name: "frankfurt",       iana_id: "Europe/Berlin",       display_city: "Frankfurt",      display_region: "Germany" },
-    CityAlias { name: "hamburg",         iana_id: "Europe/Berlin",       display_city: "Hamburg",        display_region: "Germany" },
-    CityAlias { name: "barcelona",       iana_id: "Europe/Madrid",       display_city: "Barcelona",      display_region: "Spain" },
-    CityAlias { name: "milan",           iana_id: "Europe/Rome",         display_city: "Milan",          display_region: "Italy" },
-    CityAlias { name: "manchester",      iana_id: "Europe/London",       display_city: "Manchester",     display_region: "United Kingdom" },
-    CityAlias { name: "edinburgh",       iana_id: "Europe/London",       display_city: "Edinburgh",      display_region: "United Kingdom, Scotland" },
-    CityAlias { name: "glasgow",         iana_id: "Europe/London",       display_city: "Glasgow",        display_region: "United Kingdom, Scotland" },
-    CityAlias { name: "lyon",            iana_id: "Europe/Paris",        display_city: "Lyon",           display_region: "France" },
-    CityAlias { name: "marseille",       iana_id: "Europe/Paris",        display_city: "Marseille",      display_region: "France" },
-    CityAlias { name: "rotterdam",       iana_id: "Europe/Amsterdam",    display_city: "Rotterdam",      display_region: "Netherlands" },
-    CityAlias { name: "geneva",          iana_id: "Europe/Zurich",       display_city: "Geneva",         display_region: "Switzerland" },
-    CityAlias { name: "krakow",          iana_id: "Europe/Warsaw",       display_city: "Krakow",         display_region: "Poland" },
-    CityAlias { name: "porto",           iana_id: "Europe/Lisbon",       display_city: "Porto",          display_region: "Portugal" },
-    CityAlias { name: "kiev",            iana_id: "Europe/Kyiv",         display_city: "Kyiv",           display_region: "Ukraine" },
-    CityAlias { name: "saint petersburg", iana_id: "Europe/Moscow",      display_city: "Saint Petersburg", display_region: "Russia" },
-    CityAlias { name: "tirana",          iana_id: "Europe/Tirane",       display_city: "Tirana",         display_region: "Albania" },
-    CityAlias { name: "cluj-napoca",     iana_id: "Europe/Bucharest",    display_city: "Cluj-Napoca",    display_region: "Romania" },
-    CityAlias { name: "timisoara",       iana_id: "Europe/Bucharest",    display_city: "Timisoara",      display_region: "Romania" },
-    CityAlias { name: "ankara",          iana_id: "Europe/Istanbul",     display_city: "Ankara",         display_region: "Turkey" },
+    // ── South America — region from REGION_NAMES ──
+    CityAlias { name: "rio de janeiro",   iana_id: "America/Sao_Paulo",   display_city: "Rio de Janeiro", region_override: None },
+    CityAlias { name: "brasilia",         iana_id: "America/Sao_Paulo",   display_city: "Brasilia",       region_override: None },
+    CityAlias { name: "medellin",         iana_id: "America/Bogota",      display_city: "Medellin",       region_override: None },
+    CityAlias { name: "quito",            iana_id: "America/Guayaquil",   display_city: "Quito",          region_override: None },
 
-    // Asia
-    CityAlias { name: "mumbai",          iana_id: "Asia/Kolkata",        display_city: "Mumbai",         display_region: "India" },
-    CityAlias { name: "delhi",           iana_id: "Asia/Kolkata",        display_city: "Delhi",          display_region: "India" },
-    CityAlias { name: "new delhi",       iana_id: "Asia/Kolkata",        display_city: "New Delhi",      display_region: "India" },
-    CityAlias { name: "bangalore",       iana_id: "Asia/Kolkata",        display_city: "Bangalore",      display_region: "India" },
-    CityAlias { name: "bengaluru",       iana_id: "Asia/Kolkata",        display_city: "Bengaluru",      display_region: "India" },
-    CityAlias { name: "chennai",         iana_id: "Asia/Kolkata",        display_city: "Chennai",        display_region: "India" },
-    CityAlias { name: "hyderabad",       iana_id: "Asia/Kolkata",        display_city: "Hyderabad",      display_region: "India" },
-    CityAlias { name: "pune",            iana_id: "Asia/Kolkata",        display_city: "Pune",           display_region: "India" },
-    CityAlias { name: "ahmedabad",       iana_id: "Asia/Kolkata",        display_city: "Ahmedabad",      display_region: "India" },
-    CityAlias { name: "beijing",         iana_id: "Asia/Shanghai",       display_city: "Beijing",        display_region: "China" },
-    CityAlias { name: "shenzhen",        iana_id: "Asia/Shanghai",       display_city: "Shenzhen",       display_region: "China" },
-    CityAlias { name: "guangzhou",       iana_id: "Asia/Shanghai",       display_city: "Guangzhou",      display_region: "China" },
-    CityAlias { name: "chengdu",         iana_id: "Asia/Shanghai",       display_city: "Chengdu",        display_region: "China" },
-    CityAlias { name: "osaka",           iana_id: "Asia/Tokyo",          display_city: "Osaka",          display_region: "Japan" },
-    CityAlias { name: "busan",           iana_id: "Asia/Seoul",          display_city: "Busan",          display_region: "South Korea" },
-    CityAlias { name: "abu dhabi",       iana_id: "Asia/Dubai",          display_city: "Abu Dhabi",      display_region: "United Arab Emirates" },
-    CityAlias { name: "jeddah",          iana_id: "Asia/Riyadh",         display_city: "Jeddah",         display_region: "Saudi Arabia" },
-    CityAlias { name: "tel aviv",        iana_id: "Asia/Jerusalem",      display_city: "Tel Aviv",       display_region: "Israel" },
-    CityAlias { name: "lahore",          iana_id: "Asia/Karachi",        display_city: "Lahore",         display_region: "Pakistan" },
-    CityAlias { name: "islamabad",       iana_id: "Asia/Karachi",        display_city: "Islamabad",      display_region: "Pakistan" },
-    CityAlias { name: "hanoi",           iana_id: "Asia/Ho_Chi_Minh",    display_city: "Hanoi",          display_region: "Vietnam" },
-    CityAlias { name: "bali",            iana_id: "Asia/Makassar",       display_city: "Bali",           display_region: "Indonesia" },
+    // ── Europe — overrides (more specific than REGION_NAMES) ──
+    CityAlias { name: "edinburgh",        iana_id: "Europe/London",       display_city: "Edinburgh",      region_override: Some("United Kingdom, Scotland") },
+    CityAlias { name: "glasgow",          iana_id: "Europe/London",       display_city: "Glasgow",        region_override: Some("United Kingdom, Scotland") },
 
-    // Africa
-    CityAlias { name: "cape town",       iana_id: "Africa/Johannesburg", display_city: "Cape Town",      display_region: "South Africa" },
-    CityAlias { name: "durban",          iana_id: "Africa/Johannesburg", display_city: "Durban",         display_region: "South Africa" },
-    CityAlias { name: "pretoria",        iana_id: "Africa/Johannesburg", display_city: "Pretoria",       display_region: "South Africa" },
-    CityAlias { name: "rabat",           iana_id: "Africa/Casablanca",   display_city: "Rabat",          display_region: "Morocco" },
-    CityAlias { name: "alexandria",      iana_id: "Africa/Cairo",        display_city: "Alexandria",     display_region: "Egypt" },
-    CityAlias { name: "abuja",           iana_id: "Africa/Lagos",        display_city: "Abuja",          display_region: "Nigeria" },
+    // ── Europe — region from REGION_NAMES ──
+    CityAlias { name: "munich",           iana_id: "Europe/Berlin",       display_city: "Munich",         region_override: None },
+    CityAlias { name: "frankfurt",        iana_id: "Europe/Berlin",       display_city: "Frankfurt",      region_override: None },
+    CityAlias { name: "hamburg",          iana_id: "Europe/Berlin",       display_city: "Hamburg",        region_override: None },
+    CityAlias { name: "barcelona",        iana_id: "Europe/Madrid",       display_city: "Barcelona",      region_override: None },
+    CityAlias { name: "milan",            iana_id: "Europe/Rome",         display_city: "Milan",          region_override: None },
+    CityAlias { name: "manchester",       iana_id: "Europe/London",       display_city: "Manchester",     region_override: None },
+    CityAlias { name: "lyon",             iana_id: "Europe/Paris",        display_city: "Lyon",           region_override: None },
+    CityAlias { name: "marseille",        iana_id: "Europe/Paris",        display_city: "Marseille",      region_override: None },
+    CityAlias { name: "rotterdam",        iana_id: "Europe/Amsterdam",    display_city: "Rotterdam",      region_override: None },
+    CityAlias { name: "geneva",           iana_id: "Europe/Zurich",       display_city: "Geneva",         region_override: None },
+    CityAlias { name: "krakow",           iana_id: "Europe/Warsaw",       display_city: "Krakow",         region_override: None },
+    CityAlias { name: "porto",            iana_id: "Europe/Lisbon",       display_city: "Porto",          region_override: None },
+    CityAlias { name: "kiev",             iana_id: "Europe/Kyiv",         display_city: "Kyiv",           region_override: None },
+    CityAlias { name: "saint petersburg", iana_id: "Europe/Moscow",      display_city: "Saint Petersburg", region_override: None },
+    CityAlias { name: "tirana",           iana_id: "Europe/Tirane",       display_city: "Tirana",         region_override: None },
+    CityAlias { name: "brasov",           iana_id: "Europe/Bucharest",    display_city: "Brașov",         region_override: None },
+    CityAlias { name: "constanta",        iana_id: "Europe/Bucharest",    display_city: "Constanța",      region_override: None },
+    CityAlias { name: "craiova",          iana_id: "Europe/Bucharest",    display_city: "Craiova",        region_override: None },
+    CityAlias { name: "iasi",             iana_id: "Europe/Bucharest",    display_city: "Iași",           region_override: None },
+    CityAlias { name: "cluj-napoca",      iana_id: "Europe/Bucharest",    display_city: "Cluj-Napoca",    region_override: None },
+    CityAlias { name: "timisoara",        iana_id: "Europe/Bucharest",    display_city: "Timișoara",      region_override: None },
+    CityAlias { name: "ankara",           iana_id: "Europe/Istanbul",     display_city: "Ankara",         region_override: None },
 
-    // Oceania
-    CityAlias { name: "canberra",        iana_id: "Australia/Sydney",    display_city: "Canberra",       display_region: "Australia, ACT" },
-    CityAlias { name: "christchurch",    iana_id: "Pacific/Auckland",    display_city: "Christchurch",   display_region: "New Zealand" },
-    CityAlias { name: "wellington",      iana_id: "Pacific/Auckland",    display_city: "Wellington",     display_region: "New Zealand" },
+    // ── Asia — region from REGION_NAMES ──
+    CityAlias { name: "mumbai",           iana_id: "Asia/Kolkata",        display_city: "Mumbai",         region_override: None },
+    CityAlias { name: "delhi",            iana_id: "Asia/Kolkata",        display_city: "Delhi",          region_override: None },
+    CityAlias { name: "new delhi",        iana_id: "Asia/Kolkata",        display_city: "New Delhi",      region_override: None },
+    CityAlias { name: "bangalore",        iana_id: "Asia/Kolkata",        display_city: "Bangalore",      region_override: None },
+    CityAlias { name: "bengaluru",        iana_id: "Asia/Kolkata",        display_city: "Bengaluru",      region_override: None },
+    CityAlias { name: "chennai",          iana_id: "Asia/Kolkata",        display_city: "Chennai",        region_override: None },
+    CityAlias { name: "hyderabad",        iana_id: "Asia/Kolkata",        display_city: "Hyderabad",      region_override: None },
+    CityAlias { name: "pune",             iana_id: "Asia/Kolkata",        display_city: "Pune",           region_override: None },
+    CityAlias { name: "ahmedabad",        iana_id: "Asia/Kolkata",        display_city: "Ahmedabad",      region_override: None },
+    CityAlias { name: "beijing",          iana_id: "Asia/Shanghai",       display_city: "Beijing",        region_override: None },
+    CityAlias { name: "shenzhen",         iana_id: "Asia/Shanghai",       display_city: "Shenzhen",       region_override: None },
+    CityAlias { name: "guangzhou",        iana_id: "Asia/Shanghai",       display_city: "Guangzhou",      region_override: None },
+    CityAlias { name: "chengdu",          iana_id: "Asia/Shanghai",       display_city: "Chengdu",        region_override: None },
+    CityAlias { name: "osaka",            iana_id: "Asia/Tokyo",          display_city: "Osaka",          region_override: None },
+    CityAlias { name: "busan",            iana_id: "Asia/Seoul",          display_city: "Busan",          region_override: None },
+    CityAlias { name: "abu dhabi",        iana_id: "Asia/Dubai",          display_city: "Abu Dhabi",      region_override: None },
+    CityAlias { name: "jeddah",           iana_id: "Asia/Riyadh",         display_city: "Jeddah",         region_override: None },
+    CityAlias { name: "tel aviv",         iana_id: "Asia/Jerusalem",      display_city: "Tel Aviv",       region_override: None },
+    CityAlias { name: "lahore",           iana_id: "Asia/Karachi",        display_city: "Lahore",         region_override: None },
+    CityAlias { name: "islamabad",        iana_id: "Asia/Karachi",        display_city: "Islamabad",      region_override: None },
+    CityAlias { name: "hanoi",            iana_id: "Asia/Ho_Chi_Minh",    display_city: "Hanoi",          region_override: None },
+    CityAlias { name: "bali",             iana_id: "Asia/Makassar",       display_city: "Bali",           region_override: None },
+
+    // ── Africa — region from REGION_NAMES ──
+    CityAlias { name: "cape town",        iana_id: "Africa/Johannesburg", display_city: "Cape Town",      region_override: None },
+    CityAlias { name: "durban",           iana_id: "Africa/Johannesburg", display_city: "Durban",         region_override: None },
+    CityAlias { name: "pretoria",         iana_id: "Africa/Johannesburg", display_city: "Pretoria",       region_override: None },
+    CityAlias { name: "rabat",            iana_id: "Africa/Casablanca",   display_city: "Rabat",          region_override: None },
+    CityAlias { name: "alexandria",       iana_id: "Africa/Cairo",        display_city: "Alexandria",     region_override: None },
+    CityAlias { name: "abuja",            iana_id: "Africa/Lagos",        display_city: "Abuja",          region_override: None },
+
+    // ── Oceania — overrides ──
+    CityAlias { name: "canberra",         iana_id: "Australia/Sydney",    display_city: "Canberra",       region_override: Some("Australia, ACT") },
+
+    // ── Oceania — region from REGION_NAMES ──
+    CityAlias { name: "christchurch",     iana_id: "Pacific/Auckland",    display_city: "Christchurch",   region_override: None },
+    CityAlias { name: "wellington",       iana_id: "Pacific/Auckland",    display_city: "Wellington",     region_override: None },
 ];
+
+struct CityAlias {
+    /// Lowercase search key (e.g. "san francisco").
+    name: &'static str,
+    /// IANA zone ID this alias maps to (e.g. "America/Los_Angeles").
+    iana_id: &'static str,
+    /// Pretty-printed city name shown in the UI.
+    display_city: &'static str,
+    /// If `Some`, overrides the region from `REGION_NAMES` — needed when the
+    /// alias city is in a different state/province than the IANA reference city
+    /// (e.g. Seattle is in Washington, not California). If `None`, region is
+    /// resolved via `city_and_region(iana_id)`.
+    region_override: Option<&'static str>,
+}
 
 // ---------------------------------------------------------------------------
 // Region display names for common IANA zones
@@ -219,6 +236,7 @@ static REGION_NAMES: &[(&str, &str)] = &[
     ("America/Argentina/Buenos_Aires", "Argentina"),
     ("America/Santiago",       "Chile"),
     ("America/Bogota",         "Colombia"),
+    ("America/Guayaquil",      "Ecuador"),
     ("America/Lima",           "Peru"),
     ("Europe/London",          "United Kingdom"),
     ("Europe/Paris",           "France"),
@@ -248,6 +266,7 @@ static REGION_NAMES: &[(&str, &str)] = &[
     ("Europe/Zagreb",          "Croatia"),
     ("Europe/Minsk",           "Belarus"),
     ("Europe/Chisinau",        "Moldova"),
+    ("Europe/Tirane",          "Albania"),
     ("Asia/Tokyo",             "Japan"),
     ("Asia/Shanghai",          "China"),
     ("Asia/Hong_Kong",         "China"),
@@ -266,6 +285,7 @@ static REGION_NAMES: &[(&str, &str)] = &[
     ("Asia/Kuala_Lumpur",      "Malaysia"),
     ("Asia/Ho_Chi_Minh",       "Vietnam"),
     ("Asia/Jakarta",           "Indonesia"),
+    ("Asia/Makassar",          "Indonesia"),
     ("Asia/Colombo",           "Sri Lanka"),
     ("Asia/Kathmandu",         "Nepal"),
     ("Asia/Tehran",            "Iran"),
@@ -331,10 +351,14 @@ pub fn lookup_city(name: &str) -> Option<ResolvedTz> {
     // Check aliases first
     if let Some(alias) = CITY_ALIASES.iter().find(|a| a.name == lower) {
         let tz: Tz = alias.iana_id.parse().ok()?;
+        let region = alias
+            .region_override
+            .map(|r| r.to_string())
+            .unwrap_or_else(|| city_and_region(alias.iana_id).1);
         return Some(ResolvedTz {
             tz,
             city: alias.display_city.to_string(),
-            region: alias.display_region.to_string(),
+            region,
         });
     }
 
