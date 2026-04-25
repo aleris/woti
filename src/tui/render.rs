@@ -12,15 +12,52 @@ use crate::config::{TimeFormat, WorkingHoursConfig};
 
 use super::app::App;
 use super::theme;
-use super::{BLOCK_HEIGHT, CELL_WIDTH, INFO_COL_WIDTH, TIMELINE_GAP};
+use super::{BLOCK_HEIGHT, CELL_WIDTH, INFO_COL_WIDTH, NavInterval, TIMELINE_GAP};
 
-pub fn compute_datetime_for_hour(
-    _tz: Tz,
+/// Compute the datetime for a cell whose offset from "now" is given in minutes.
+/// Used by the sub-hour interval rendering pipeline (and equivalent to the
+/// legacy hour-based helper when `offset_minutes` is a multiple of 60).
+pub fn compute_datetime_for_minutes(
     now_tz: chrono::DateTime<Tz>,
-    offset_from_current: i32,
+    offset_minutes: i32,
 ) -> chrono::DateTime<Tz> {
-    let duration = chrono::Duration::hours(offset_from_current as i64);
-    now_tz + duration
+    now_tz + chrono::Duration::minutes(offset_minutes as i64)
+}
+
+/// Floor `now_tz` to the most recent boundary of `interval_minutes`. For the
+/// 60-minute interval we intentionally return `now_tz` unchanged so the H1
+/// rendering path stays byte-for-byte identical to the legacy behavior
+/// (which preserved `now_tz`'s wall-clock minutes inside each hour cell).
+fn floor_to_interval(now_tz: chrono::DateTime<Tz>, interval_minutes: i32) -> chrono::DateTime<Tz> {
+    if interval_minutes >= 60 {
+        return now_tz;
+    }
+    let minute = now_tz.minute() as i32;
+    let floored_minute = (minute / interval_minutes) * interval_minutes;
+    let drop_minutes = minute - floored_minute;
+    now_tz
+        - chrono::Duration::minutes(drop_minutes as i64)
+        - chrono::Duration::seconds(now_tz.second() as i64)
+        - chrono::Duration::nanoseconds(now_tz.nanosecond() as i64)
+}
+
+/// `true` when the cell at `dt` is an "hour cell" (rendered with the wall-hour
+/// digit + the timezone's existing sub-row glyph). Intermediate cells in
+/// sub-hour intervals fail this check and render `·` + a wall-clock minute
+/// superscript instead.
+///
+/// In sub-hour intervals the cell stride may not divide a timezone's
+/// `offset_m` evenly (e.g. Nepal `+5:45` at M30: cells land on `:00`/`:30`
+/// but the natural hour change is at `:45`). To keep one hour digit per
+/// hour aligned visually with other timezones, we pick the cell whose
+/// `[start, start + interval)` window *contains* the natural hour boundary,
+/// i.e. `dt.minute() == floor(offset_m / interval_minutes) * interval_minutes`.
+/// At H1 callers short-circuit; this helper is only meaningful for
+/// `interval_minutes < 60`.
+fn is_hour_cell(dt: chrono::DateTime<Tz>, offset_m: i32, interval_minutes: i32) -> bool {
+    let cell_minute = dt.minute() as i32;
+    let target = (offset_m / interval_minutes) * interval_minutes;
+    cell_minute == target
 }
 
 impl App {
@@ -72,15 +109,20 @@ impl App {
         let label_on = Style::default().fg(theme::LABEL_FG);
         let label_off = Style::default().fg(theme::LABEL_DISABLED_FG);
 
+        let nav_label = match self.interval {
+            NavInterval::H1 => " Hour ",
+            NavInterval::M30 => " 30m ",
+            NavInterval::M15 => " 15m ",
+        };
         let shortcuts = vec![
             Span::styled(" ↑ ", if can_up { key_on } else { key_off }),
             Span::styled(" Up ", if can_up { label_on } else { label_off }),
             Span::styled(" ↓ ", if can_down { key_on } else { key_off }),
             Span::styled(" Down ", if can_down { label_on } else { label_off }),
             Span::styled(" ← ", key_on),
-            Span::styled(" Prev Hour ", label_on),
+            Span::styled(format!(" Prev{nav_label}"), label_on),
             Span::styled(" → ", key_on),
-            Span::styled(" Next Hour ", label_on),
+            Span::styled(format!(" Next{nav_label}"), label_on),
             Span::styled(" c ", key_on),
             Span::styled(" Copy ", label_on),
             Span::styled(" q ", key_on),
@@ -99,6 +141,26 @@ impl App {
         } else {
             Style::default().fg(theme::HOUR_FG_TRANSITION)
         };
+
+        let interval_switcher: Vec<Span> = vec![
+            Span::styled(" i ", key_on),
+            Span::raw(" "),
+            Span::styled(
+                " 60 ",
+                if self.interval == NavInterval::H1 { sel } else { dim },
+            ),
+            Span::styled("│", sep),
+            Span::styled(
+                " 30 ",
+                if self.interval == NavInterval::M30 { sel } else { dim },
+            ),
+            Span::styled("│", sep),
+            Span::styled(
+                " 15 ",
+                if self.interval == NavInterval::M15 { sel } else { dim },
+            ),
+            Span::raw(" "),
+        ];
 
         let fmt_switcher: Vec<Span> = vec![
             Span::styled(" w ", key_on),
@@ -135,11 +197,13 @@ impl App {
         ];
 
         let left_w: usize = shortcuts.iter().map(|s| s.width()).sum();
-        let right_w: usize = fmt_switcher.iter().map(|s| s.width()).sum();
+        let right_w: usize = interval_switcher.iter().map(|s| s.width()).sum::<usize>()
+            + fmt_switcher.iter().map(|s| s.width()).sum::<usize>();
         let spacer = (area.width as usize).saturating_sub(left_w + right_w);
 
         let mut spans = shortcuts;
         spans.push(Span::raw(" ".repeat(spacer)));
+        spans.extend(interval_switcher);
         spans.extend(fmt_switcher);
 
         let line = Line::from(spans);
@@ -164,8 +228,9 @@ impl App {
             y += BLOCK_HEIGHT;
         }
 
-        if self.hour_offset != 0 && y < y_end {
-            let label = format_hour_offset(self.hour_offset);
+        if self.cell_offset != 0 && y < y_end {
+            let selected_minutes = self.cell_offset * self.interval.minutes() as i32;
+            let label = format_offset(selected_minutes);
             let inner_width = area.width.saturating_sub(2);
             let info_w = (INFO_COL_WIDTH.min(inner_width)) as usize;
             let left_pad = info_w + TIMELINE_GAP as usize;
@@ -194,17 +259,27 @@ impl App {
 
         let now_utc = self.reference_time();
         let now_tz = now_utc.with_timezone(&tz);
-        let current_hour = now_tz.hour() as i32;
+        let interval_minutes = self.interval.minutes() as i32;
+        let anchor_dt = floor_to_interval(now_tz, interval_minutes);
+        let selected_offset_minutes = self.cell_offset * interval_minutes;
+        // Cell-aligned anchor for the timeline (snaps to interval grid so
+        // hour digits land on the right column and `is_hour_cell` works).
+        let cell_anchor_dt = compute_datetime_for_minutes(anchor_dt, selected_offset_minutes);
+        // Left-info datetime preserves the actual wall-clock minute (e.g.
+        // `:37` instead of the floored `:30`/`:15`). Mirrors the H1 path
+        // where `floor_to_interval` is a no-op and the displayed time is
+        // simply `now_tz + cell_offset * 60` — i.e. the user's original
+        // minute is carried through navigation.
+        let display_dt = compute_datetime_for_minutes(now_tz, selected_offset_minutes);
 
         let use_24h = self.use_24h_for_tz(&entry.iana_id);
-        let selected_dt = compute_datetime_for_hour(tz, now_tz, self.hour_offset);
-        let tz_abbr = selected_dt.format("%Z").to_string();
+        let tz_abbr = crate::tz_data::display_abbreviation(&display_dt);
         let time_str = if use_24h {
-            selected_dt.format("%H:%M").to_string()
+            display_dt.format("%H:%M").to_string()
         } else {
-            selected_dt.format("%-I:%M %p").to_string()
+            display_dt.format("%-I:%M %p").to_string()
         };
-        let date_str = selected_dt.format("%a, %b %d").to_string();
+        let date_str = display_dt.format("%a, %b %d").to_string();
 
         let block = Block::default().padding(Padding::new(1, 1, 0, 0));
         let inner = block.inner(area);
@@ -221,12 +296,12 @@ impl App {
         let left_pad = info_w + TIMELINE_GAP as usize;
         let timeline_avail = inner.width.saturating_sub(left_pad as u16);
         let num_cells = (timeline_avail / CELL_WIDTH) as i32;
-
-        let base_hour = current_hour + self.hour_offset;
-        let start_hour = base_hour - num_cells / 2;
         let cell_w = CELL_WIDTH as usize;
 
-        let utc_secs = selected_dt.offset().fix().local_minus_utc();
+        let selected_idx = num_cells / 2;
+        let current_idx = selected_idx - self.cell_offset;
+
+        let utc_secs = cell_anchor_dt.offset().fix().local_minus_utc();
         let offset_m = (utc_secs.abs() % 3600) / 60;
 
         let shading = if self.shading_enabled {
@@ -236,15 +311,15 @@ impl App {
         };
 
         let tl = TimelineParams {
-            start_hour,
-            base_hour,
-            current_hour,
-            hour_offset: self.hour_offset,
+            base_dt: cell_anchor_dt,
+            cell_offset: self.cell_offset,
             num_cells,
+            selected_idx,
+            current_idx,
+            interval_minutes,
             cell_w,
             use_24h,
             offset_m,
-            tz,
             now_tz,
             shading,
         };
@@ -257,7 +332,7 @@ impl App {
         line1.extend(day_spans);
         frame.render_widget(Paragraph::new(Line::from(line1)), rows[0]);
 
-        let mut line2 = build_info_line(entry, &tz_abbr, &time_str, selected_dt, info_w);
+        let mut line2 = build_info_line(entry, &tz_abbr, &time_str, display_dt, info_w);
         line2.extend(hour_spans);
         frame.render_widget(Paragraph::new(Line::from(line2)), rows[1]);
 
@@ -275,17 +350,43 @@ impl App {
 }
 
 struct TimelineParams {
-    start_hour: i32,
-    base_hour: i32,
-    current_hour: i32,
-    hour_offset: i32,
+    /// Absolute datetime of the selected (center) cell.
+    base_dt: chrono::DateTime<Tz>,
+    /// Selected cell offset (in cells, signed) relative to the "now" cell.
+    cell_offset: i32,
     num_cells: i32,
+    /// Index of the selected cell in the visible row (always `num_cells / 2`).
+    selected_idx: i32,
+    /// Index of the cell holding the floored "now" boundary
+    /// (`selected_idx - cell_offset`).
+    current_idx: i32,
+    /// Minutes per cell. `60` reproduces the legacy hourly view byte-for-byte.
+    interval_minutes: i32,
     cell_w: usize,
     use_24h: bool,
+    /// Timezone's sub-hour minute offset from UTC (e.g. `30` for IST, `45` for
+    /// Nepal). Used to pick which cells are "hour cells" in sub-hour modes.
     offset_m: i32,
-    tz: Tz,
     now_tz: chrono::DateTime<Tz>,
     shading: Option<WorkingHoursConfig>,
+}
+
+impl TimelineParams {
+    /// Datetime for the cell at visible index `i`.
+    fn dt_for_cell(&self, i: i32) -> chrono::DateTime<Tz> {
+        let delta = (i - self.selected_idx) as i64 * self.interval_minutes as i64;
+        self.base_dt + chrono::Duration::minutes(delta)
+    }
+
+    /// True at H1 (every cell is conceptually an hour cell) or when the cell
+    /// is the sub-hour cell whose window contains the timezone's natural
+    /// hour boundary.
+    fn is_hour_cell_at(&self, i: i32) -> bool {
+        if self.interval_minutes >= 60 {
+            return true;
+        }
+        is_hour_cell(self.dt_for_cell(i), self.offset_m, self.interval_minutes)
+    }
 }
 
 fn selected_style() -> Style {
@@ -324,20 +425,14 @@ fn ampm_fg_color(hour_in_day: i32, wh: &WorkingHoursConfig) -> Color {
 fn build_hour_spans(p: &TimelineParams) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     for i in 0..p.num_cells {
-        let h = p.start_hour + i;
-        let dt = compute_datetime_for_hour(p.tz, p.now_tz, h - p.current_hour);
+        let dt = p.dt_for_cell(i);
         let hour_in_day = dt.hour() as i32;
-        let is_selected = h == p.base_hour;
-        let is_local = h == p.current_hour && p.hour_offset != 0;
+        let is_selected = i == p.selected_idx;
+        let is_local = i == p.current_idx && p.cell_offset != 0;
+        let is_hour = p.is_hour_cell_at(i);
 
-        let h_num = if p.use_24h {
-            format!("{:>2}", hour_in_day)
-        } else {
-            let h12 = hour_in_day % 12;
-            let h12 = if h12 == 0 { 12 } else { h12 };
-            format!("{:>2}", h12)
-        };
-
+        // Shading is computed against the wall hour, even on intermediate
+        // cells, so that 14:15 / 14:30 / 14:45 inherit the same band as 14:00.
         let fg = match &p.shading {
             Some(wh) => hour_fg_color(hour_in_day, wh),
             None => theme::HOUR_FG,
@@ -351,14 +446,38 @@ fn build_hour_spans(p: &TimelineParams) -> Vec<Span<'static>> {
             Style::default().fg(fg)
         };
 
+        let text = if is_hour {
+            if p.use_24h {
+                format!("{:>2}", hour_in_day)
+            } else {
+                let h12 = hour_in_day % 12;
+                let h12 = if h12 == 0 { 12 } else { h12 };
+                format!("{:>2}", h12)
+            }
+        } else {
+            // Intermediate cell in a sub-hour interval: right-aligned tick.
+            " ·".to_string()
+        };
+
         spans.push(Span::raw(" "));
-        spans.push(Span::styled(h_num, style));
+        spans.push(Span::styled(text, style));
     }
     spans
 }
 
-fn minutes_superscript(m: i32) -> &'static str {
+/// Superscript glyph for a wall-clock minute on intermediate cells, or for a
+/// timezone's sub-hour offset on hour cells. Returns two spaces for any value
+/// outside `{0, 15, 30, 45}` so width stays stable.
+///
+/// The `0 → "⁰⁰"` case only ever fires on intermediate cells of fractional
+/// zones (Nepal `+5:45`, India `+5:30`, etc.) where the wall-clock `:00`
+/// boundary lands on a tick row, not on an hour digit. For whole-hour zones
+/// the `:00` cell is the hour cell itself (handled separately and kept blank
+/// in 24h mode / `am`/`pm` in 12h), so `⁰⁰` never appears in their sub-row.
+fn minutes_superscript_full(m: i32) -> &'static str {
     match m {
+        0 => "⁰⁰",
+        15 => "¹⁵",
         30 => "³⁰",
         45 => "⁴⁵",
         _ => "  ",
@@ -376,11 +495,11 @@ fn minutes_fraction(m: i32) -> &'static str {
 fn build_ampm_spans(p: &TimelineParams) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     for i in 0..p.num_cells {
-        let h = p.start_hour + i;
-        let dt = compute_datetime_for_hour(p.tz, p.now_tz, h - p.current_hour);
+        let dt = p.dt_for_cell(i);
         let hour_in_day = dt.hour() as i32;
-        let is_selected = h == p.base_hour;
-        let is_local = h == p.current_hour && p.hour_offset != 0;
+        let is_selected = i == p.selected_idx;
+        let is_local = i == p.current_idx && p.cell_offset != 0;
+        let is_hour = p.is_hour_cell_at(i);
 
         let (text, style) = if !p.use_24h {
             let fg = match &p.shading {
@@ -398,13 +517,20 @@ fn build_ampm_spans(p: &TimelineParams) -> Vec<Span<'static>> {
                     .add_modifier(Modifier::DIM)
             };
 
-            let text = if p.offset_m != 0 {
-                let frac = minutes_fraction(p.offset_m);
-                let meridiem = if hour_in_day < 12 { "a" } else { "p" };
-                format!("{frac}{meridiem}")
+            let text = if is_hour {
+                // Hour cell: existing am/pm or ½a/¾p glyph stays unchanged.
+                if p.offset_m != 0 {
+                    let frac = minutes_fraction(p.offset_m);
+                    let meridiem = if hour_in_day < 12 { "a" } else { "p" };
+                    format!("{frac}{meridiem}")
+                } else {
+                    let ampm = if hour_in_day < 12 { "am" } else { "pm" };
+                    ampm.to_string()
+                }
             } else {
-                let ampm = if hour_in_day < 12 { "am" } else { "pm" };
-                ampm.to_string()
+                // Intermediate cell (sub-hour interval): wall-clock minute
+                // superscript (¹⁵ / ³⁰ / ⁴⁵).
+                minutes_superscript_full(dt.minute() as i32).to_string()
             };
             (text, style)
         } else {
@@ -416,10 +542,18 @@ fn build_ampm_spans(p: &TimelineParams) -> Vec<Span<'static>> {
                 Style::default()
             };
 
-            let text = if p.offset_m != 0 {
-                minutes_superscript(p.offset_m).to_string()
+            let text = if is_hour {
+                if p.offset_m != 0 {
+                    // Half/quarter-hour zone hour cell: keep ³⁰ / ⁴⁵ glyph.
+                    minutes_superscript_full(p.offset_m).to_string()
+                } else {
+                    // 24h whole-hour zone hour cell: stays blank in all
+                    // intervals (better visual contrast — the hour digit
+                    // on the row above already marks the slot).
+                    "  ".to_string()
+                }
             } else {
-                "  ".to_string()
+                minutes_superscript_full(dt.minute() as i32).to_string()
             };
             (text, style)
         };
@@ -437,10 +571,11 @@ fn build_day_spans(p: &TimelineParams) -> Vec<Span<'static>> {
     let mut day_label_origin: Vec<Option<i32>> = vec![None; total_day_chars];
 
     for i in 0..p.num_cells {
-        let h = p.start_hour + i;
-        let dt = compute_datetime_for_hour(p.tz, p.now_tz, h - p.current_hour);
+        let dt = p.dt_for_cell(i);
 
-        if dt.hour() == 0 {
+        // Only place the day label on hour cells: in sub-hour intervals we
+        // must not light it up at 00:15 / 00:30 / 00:45.
+        if dt.hour() == 0 && p.is_hour_cell_at(i) {
             let today = p.now_tz.date_naive();
             let label_date = dt.date_naive();
             let mut day_label = format!(
@@ -462,23 +597,22 @@ fn build_day_spans(p: &TimelineParams) -> Vec<Span<'static>> {
                 if pos < total_day_chars {
                     day_chars[pos] = ch;
                     day_is_label[pos] = true;
-                    day_label_origin[pos] = Some(h);
+                    day_label_origin[pos] = Some(i);
                 }
             }
         }
     }
 
     let style_for = |pos: usize| -> Style {
-        let cell_idx = pos / p.cell_w;
+        let cell_idx = (pos / p.cell_w) as i32;
         let pos_in_cell = pos % p.cell_w;
-        let h = p.start_hour + cell_idx as i32;
-        let is_sel = h == p.base_hour;
-        let is_loc = h == p.current_hour && p.hour_offset != 0;
+        let is_sel = cell_idx == p.selected_idx;
+        let is_loc = cell_idx == p.current_idx && p.cell_offset != 0;
         let is_lab = day_is_label[pos];
         let has_bg = pos_in_cell > 0;
         let origin = day_label_origin[pos];
-        let label_sel = is_lab && origin == Some(p.base_hour);
-        let label_loc = is_lab && origin == Some(p.current_hour) && p.hour_offset != 0;
+        let label_sel = is_lab && origin == Some(p.selected_idx);
+        let label_loc = is_lab && origin == Some(p.current_idx) && p.cell_offset != 0;
         if label_sel || (is_sel && has_bg) {
             Style::default()
                 .fg(theme::SELECTED_FG)
@@ -554,13 +688,43 @@ fn build_info_line<'a>(
     ]
 }
 
-fn format_hour_offset(offset: i32) -> String {
-    match offset {
-        0 => String::new(),
-        1 => "in 1 hour".to_string(),
-        -1 => "1 hour ago".to_string(),
-        n if n > 0 => format!("in {} hours", n),
-        n => format!("{} hours ago", n.abs()),
+/// Render the relative-offset label shown above the selected column.
+///
+/// Returns "" for zero, "in <X>" for positive offsets, "<X> ago" for negative
+/// offsets, where `<X>` may combine hours and minutes (e.g. `"1 hour 15
+/// minutes"`). For hour-only or minute-only offsets only the relevant unit is
+/// shown. Singular vs plural is respected for both units.
+pub(crate) fn format_offset(minutes: i32) -> String {
+    if minutes == 0 {
+        return String::new();
+    }
+    let sign_positive = minutes > 0;
+    let abs = minutes.abs();
+    let h = abs / 60;
+    let m = abs % 60;
+
+    fn unit(n: i32, singular: &str, plural: &str) -> String {
+        if n == 1 {
+            format!("1 {singular}")
+        } else {
+            format!("{n} {plural}")
+        }
+    }
+
+    let body = match (h, m) {
+        (0, m) => unit(m, "minute", "minutes"),
+        (h, 0) => unit(h, "hour", "hours"),
+        (h, m) => format!(
+            "{} {}",
+            unit(h, "hour", "hours"),
+            unit(m, "minute", "minutes")
+        ),
+    };
+
+    if sign_positive {
+        format!("in {body}")
+    } else {
+        format!("{body} ago")
     }
 }
 
@@ -569,22 +733,40 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
 
-    fn make_params(use_24h: bool) -> TimelineParams {
-        let tz: Tz = chrono_tz::UTC;
-        let now_tz = tz.with_ymd_and_hms(2026, 3, 19, 22, 0, 0).unwrap();
+    /// Build a `TimelineParams` for cell-based tests.
+    /// `selected_idx_in_window` says where the selected cell sits in the visible row;
+    /// `current_idx_in_window` is computed as `selected_idx - cell_offset`.
+    fn params_h1(
+        now_tz: chrono::DateTime<Tz>,
+        selected_dt: chrono::DateTime<Tz>,
+        cell_offset: i32,
+        num_cells: i32,
+        use_24h: bool,
+        offset_m: i32,
+    ) -> TimelineParams {
+        let selected_idx = num_cells / 2;
         TimelineParams {
-            start_hour: -2,
-            base_hour: 0,
-            current_hour: 22,
-            hour_offset: -22,
-            num_cells: 10,
+            base_dt: selected_dt,
+            cell_offset,
+            num_cells,
+            selected_idx,
+            current_idx: selected_idx - cell_offset,
+            interval_minutes: 60,
             cell_w: CELL_WIDTH as usize,
             use_24h,
-            offset_m: 0,
-            tz,
+            offset_m,
             now_tz,
             shading: None,
         }
+    }
+
+    fn make_params(use_24h: bool) -> TimelineParams {
+        // 2026-03-19 22:00 UTC, select +2h → midnight 2026-03-20 (Friday) at the
+        // center cell so day-label rendering fits inside a 10-cell window.
+        let tz: Tz = chrono_tz::UTC;
+        let now_tz = tz.with_ymd_and_hms(2026, 3, 19, 22, 0, 0).unwrap();
+        let selected_dt = tz.with_ymd_and_hms(2026, 3, 20, 0, 0, 0).unwrap();
+        params_h1(now_tz, selected_dt, 2, 10, use_24h, 0)
     }
 
     fn spans_to_string(spans: &[Span]) -> String {
@@ -596,7 +778,7 @@ mod tests {
         let p = make_params(true);
         let spans = build_day_spans(&p);
         let text = spans_to_string(&spans);
-        let midnight_cell = 2_usize;
+        let midnight_cell = p.selected_idx as usize;
         let expected_pos = midnight_cell * p.cell_w + 2;
         let first_non_space = text.find(|c: char| c != ' ').unwrap();
         assert_eq!(
@@ -610,7 +792,7 @@ mod tests {
         let p = make_params(false);
         let spans = build_day_spans(&p);
         let text = spans_to_string(&spans);
-        let midnight_cell = 2_usize;
+        let midnight_cell = p.selected_idx as usize;
         let expected_pos = midnight_cell * p.cell_w + 1;
         let first_non_space = text.find(|c: char| c != ' ').unwrap();
         assert_eq!(
@@ -622,21 +804,10 @@ mod tests {
     #[test]
     fn day_label_includes_month_on_month_boundary() {
         let tz: Tz = chrono_tz::UTC;
-        // March 31, 2026 22:00 — cell 2 crosses midnight into April 1 (Wednesday)
+        // 2026-03-31 22:00 UTC, select +2h → midnight 2026-04-01 (Wed) at center.
         let now_tz = tz.with_ymd_and_hms(2026, 3, 31, 22, 0, 0).unwrap();
-        let p = TimelineParams {
-            start_hour: 22,
-            base_hour: 22,
-            current_hour: 22,
-            hour_offset: 0,
-            num_cells: 10,
-            cell_w: CELL_WIDTH as usize,
-            use_24h: true,
-            offset_m: 0,
-            tz,
-            now_tz,
-            shading: None,
-        };
+        let selected_dt = tz.with_ymd_and_hms(2026, 4, 1, 0, 0, 0).unwrap();
+        let p = params_h1(now_tz, selected_dt, 2, 10, true, 0);
         let spans = build_day_spans(&p);
         let text = spans_to_string(&spans);
         assert!(
@@ -652,21 +823,10 @@ mod tests {
     #[test]
     fn day_label_includes_month_and_year_on_year_boundary() {
         let tz: Tz = chrono_tz::UTC;
-        // Dec 31, 2026 22:00 — cell 2 crosses midnight into Jan 1, 2027 (Friday)
+        // Wider 14-cell window so the long "FRI 1, January, 2027" label fits.
         let now_tz = tz.with_ymd_and_hms(2026, 12, 31, 22, 0, 0).unwrap();
-        let p = TimelineParams {
-            start_hour: 22,
-            base_hour: 22,
-            current_hour: 22,
-            hour_offset: 0,
-            num_cells: 10,
-            cell_w: CELL_WIDTH as usize,
-            use_24h: true,
-            offset_m: 0,
-            tz,
-            now_tz,
-            shading: None,
-        };
+        let selected_dt = tz.with_ymd_and_hms(2027, 1, 1, 0, 0, 0).unwrap();
+        let p = params_h1(now_tz, selected_dt, 2, 16, true, 0);
         let spans = build_day_spans(&p);
         let text = spans_to_string(&spans);
         assert!(
@@ -685,13 +845,12 @@ mod tests {
 
     #[test]
     fn selection_at_midnight_highlights_full_day_label() {
-        // make_params: base_hour=0 (midnight, selected), 24h mode
-        // Label "THU 19" spans positions 8..14 across cells 2-4
+        // make_params: now=2026-03-19 22:00, +2h selected → midnight 2026-03-20 (Fri).
         let p = make_params(true);
         let spans = build_day_spans(&p);
         let sel_text = selected_bg_text(&spans);
         assert!(
-            sel_text.contains("THU 19"),
+            sel_text.contains("FRI 20"),
             "selection at midnight should highlight full label, got selected text: '{sel_text}'"
         );
     }
@@ -700,19 +859,9 @@ mod tests {
     fn selection_not_at_midnight_keeps_single_cell_highlight() {
         let tz: Tz = chrono_tz::UTC;
         let now_tz = tz.with_ymd_and_hms(2026, 3, 19, 22, 0, 0).unwrap();
-        let p = TimelineParams {
-            start_hour: -2,
-            base_hour: 3,
-            current_hour: 22,
-            hour_offset: -19,
-            num_cells: 10,
-            cell_w: CELL_WIDTH as usize,
-            use_24h: true,
-            offset_m: 0,
-            tz,
-            now_tz,
-            shading: None,
-        };
+        // Selected = 03:00 next day (cell_offset = +5 hours from now=22:00)
+        let selected_dt = tz.with_ymd_and_hms(2026, 3, 20, 3, 0, 0).unwrap();
+        let p = params_h1(now_tz, selected_dt, 5, 10, true, 0);
         let spans = build_day_spans(&p);
         let sel_text = selected_bg_text(&spans);
         assert!(
@@ -724,21 +873,10 @@ mod tests {
     #[test]
     fn selection_at_midnight_highlights_label_with_month_suffix() {
         let tz: Tz = chrono_tz::UTC;
-        // March 31, 2026 22:00 — select midnight (h=24) crossing into April 1
         let now_tz = tz.with_ymd_and_hms(2026, 3, 31, 22, 0, 0).unwrap();
-        let p = TimelineParams {
-            start_hour: 19,
-            base_hour: 24,
-            current_hour: 22,
-            hour_offset: 2,
-            num_cells: 10,
-            cell_w: CELL_WIDTH as usize,
-            use_24h: true,
-            offset_m: 0,
-            tz,
-            now_tz,
-            shading: None,
-        };
+        // Select midnight crossing into April 1 (cell_offset = +2 hours)
+        let selected_dt = tz.with_ymd_and_hms(2026, 4, 1, 0, 0, 0).unwrap();
+        let p = params_h1(now_tz, selected_dt, 2, 10, true, 0);
         let spans = build_day_spans(&p);
         let sel_text = selected_bg_text(&spans);
         assert!(
@@ -788,36 +926,372 @@ mod tests {
         assert_eq!(hour_fg_color(20, &wh), theme::HOUR_FG_NIGHT, "hour 20 should be night");
     }
 
+    // --- Spec: "Hour-offset indicator" / "format_offset" ---
+
     #[test]
-    fn format_hour_offset_zero_is_empty() {
-        assert_eq!(format_hour_offset(0), "");
+    fn format_offset_zero_is_empty() {
+        assert_eq!(format_offset(0), "");
     }
 
     #[test]
-    fn format_hour_offset_positive_singular() {
-        assert_eq!(format_hour_offset(1), "in 1 hour");
+    fn format_offset_pure_hours_singular() {
+        assert_eq!(format_offset(60), "in 1 hour");
+        assert_eq!(format_offset(-60), "1 hour ago");
     }
 
     #[test]
-    fn format_hour_offset_negative_singular() {
-        assert_eq!(format_hour_offset(-1), "1 hour ago");
+    fn format_offset_pure_hours_plural() {
+        assert_eq!(format_offset(120), "in 2 hours");
+        assert_eq!(format_offset(-300), "5 hours ago");
+        assert_eq!(format_offset(6000), "in 100 hours");
+        assert_eq!(format_offset(-2880), "48 hours ago");
     }
 
     #[test]
-    fn format_hour_offset_positive_plural() {
-        assert_eq!(format_hour_offset(2), "in 2 hours");
-        assert_eq!(format_hour_offset(5), "in 5 hours");
+    fn format_offset_pure_minutes_singular() {
+        assert_eq!(format_offset(1), "in 1 minute");
+        assert_eq!(format_offset(-1), "1 minute ago");
     }
 
     #[test]
-    fn format_hour_offset_negative_plural() {
-        assert_eq!(format_hour_offset(-3), "3 hours ago");
-        assert_eq!(format_hour_offset(-12), "12 hours ago");
+    fn format_offset_pure_minutes_plural() {
+        assert_eq!(format_offset(15), "in 15 minutes");
+        assert_eq!(format_offset(30), "in 30 minutes");
+        assert_eq!(format_offset(45), "in 45 minutes");
+        assert_eq!(format_offset(-30), "30 minutes ago");
     }
 
     #[test]
-    fn format_hour_offset_large_values() {
-        assert_eq!(format_hour_offset(100), "in 100 hours");
-        assert_eq!(format_hour_offset(-48), "48 hours ago");
+    fn format_offset_mixed_hours_and_minutes() {
+        assert_eq!(format_offset(75), "in 1 hour 15 minutes");
+        assert_eq!(format_offset(-150), "2 hours 30 minutes ago");
+        assert_eq!(format_offset(61), "in 1 hour 1 minute");
+        assert_eq!(format_offset(-121), "2 hours 1 minute ago");
+    }
+
+    // --- Spec: "is_hour_cell helper" ---
+
+    /// Left-info time string preserves the actual wall-clock minute when
+    /// `cell_offset == 0`. With a sub-hour interval, naively using the
+    /// floored cell-anchor would clamp `:37` → `:30`/`:15`, which is the
+    /// regression this test guards against.
+    #[test]
+    fn left_info_time_preserves_actual_minute_at_cell_offset_zero() {
+        let tz: Tz = "Europe/Bucharest".parse().unwrap();
+        let now_tz = tz.with_ymd_and_hms(2026, 4, 25, 15, 37, 0).unwrap();
+        let interval_minutes = 30;
+        let cell_offset: i32 = 0;
+        // Mirrors the render-time formula:
+        //   display_dt = compute_datetime_for_minutes(now_tz, cell_offset * interval)
+        let display_dt =
+            compute_datetime_for_minutes(now_tz, cell_offset * interval_minutes);
+        assert_eq!(display_dt.format("%H:%M").to_string(), "15:37");
+    }
+
+    /// At sub-hour intervals, navigating preserves the original wall-clock
+    /// minute (mirroring the H1 path where 15:37 → 16:37 → 17:37). At M30
+    /// with `cell_offset == 2`, 15:37 → 17:37 (not 17:30).
+    #[test]
+    fn left_info_time_preserves_minute_through_navigation() {
+        let tz: Tz = "Europe/Bucharest".parse().unwrap();
+        let now_tz = tz.with_ymd_and_hms(2026, 4, 25, 15, 37, 0).unwrap();
+        let interval_minutes = 30;
+        let cell_offset: i32 = 2; // +2 cells × 30 min = +1h
+        let display_dt =
+            compute_datetime_for_minutes(now_tz, cell_offset * interval_minutes);
+        assert_eq!(display_dt.format("%H:%M").to_string(), "16:37");
+
+        // Same minute is preserved at M15 too: +4 cells × 15 min = +1h.
+        let interval_15 = 15;
+        let cell_offset_15: i32 = 4;
+        let display_dt_15 =
+            compute_datetime_for_minutes(now_tz, cell_offset_15 * interval_15);
+        assert_eq!(display_dt_15.format("%H:%M").to_string(), "16:37");
+    }
+
+    /// The cell-anchor (used for timeline rendering) stays floored to the
+    /// interval grid so hour digits column-align across zones, even when
+    /// the left-info display preserves the actual minute.
+    #[test]
+    fn cell_anchor_at_cell_offset_zero_is_floored_for_sub_hour_intervals() {
+        let tz: Tz = "Europe/Bucharest".parse().unwrap();
+        let now_tz = tz.with_ymd_and_hms(2026, 4, 25, 15, 37, 0).unwrap();
+        let interval_minutes = 30;
+        let anchor_dt = floor_to_interval(now_tz, interval_minutes);
+        let cell_anchor = compute_datetime_for_minutes(anchor_dt, 0);
+        assert_eq!(cell_anchor.format("%H:%M").to_string(), "15:30");
+
+        // At H1 the anchor is identical to `now_tz` (no flooring), so
+        // the cell-anchor and display-dt collapse to the same value —
+        // this is the property that makes 60-min mode preserve `:37`
+        // today, and what we now mirror for sub-hour intervals on the
+        // info column.
+        let anchor_h1 = floor_to_interval(now_tz, 60);
+        assert_eq!(anchor_h1.format("%H:%M").to_string(), "15:37");
+    }
+
+    #[test]
+    fn is_hour_cell_whole_hour_zone() {
+        let tz: Tz = chrono_tz::UTC;
+        let dt0 = tz.with_ymd_and_hms(2026, 4, 25, 14, 0, 0).unwrap();
+        let dt15 = tz.with_ymd_and_hms(2026, 4, 25, 14, 15, 0).unwrap();
+        let dt30 = tz.with_ymd_and_hms(2026, 4, 25, 14, 30, 0).unwrap();
+        let dt45 = tz.with_ymd_and_hms(2026, 4, 25, 14, 45, 0).unwrap();
+        assert!(is_hour_cell(dt0, 0, 15));
+        assert!(!is_hour_cell(dt15, 0, 15));
+        assert!(!is_hour_cell(dt30, 0, 15));
+        assert!(!is_hour_cell(dt45, 0, 15));
+    }
+
+    #[test]
+    fn is_hour_cell_half_hour_zone_at_m30() {
+        let tz: Tz = chrono_tz::UTC;
+        let dt30 = tz.with_ymd_and_hms(2026, 4, 25, 14, 30, 0).unwrap();
+        let dt0 = tz.with_ymd_and_hms(2026, 4, 25, 15, 0, 0).unwrap();
+        assert!(is_hour_cell(dt30, 30, 30));
+        assert!(!is_hour_cell(dt0, 30, 30));
+    }
+
+    #[test]
+    fn is_hour_cell_quarter_hour_zone_at_m15() {
+        let tz: Tz = chrono_tz::UTC;
+        let dt45 = tz.with_ymd_and_hms(2026, 4, 25, 14, 45, 0).unwrap();
+        let dt15 = tz.with_ymd_and_hms(2026, 4, 25, 14, 15, 0).unwrap();
+        assert!(is_hour_cell(dt45, 45, 15));
+        assert!(!is_hour_cell(dt15, 45, 15));
+    }
+
+    /// Regression: Nepal `+5:45` at M30 — cells land on `:00`/`:30` so the
+    /// natural `:45` hour boundary falls inside the `[:30, :00)` window.
+    /// The `:30` cell must be marked as the hour cell so the row still
+    /// shows hour digits aligned with other timezones.
+    #[test]
+    fn is_hour_cell_quarter_hour_zone_at_m30() {
+        let tz: Tz = chrono_tz::UTC;
+        let dt00 = tz.with_ymd_and_hms(2026, 4, 25, 14, 0, 0).unwrap();
+        let dt30 = tz.with_ymd_and_hms(2026, 4, 25, 14, 30, 0).unwrap();
+        assert!(!is_hour_cell(dt00, 45, 30));
+        assert!(is_hour_cell(dt30, 45, 30));
+    }
+
+    // --- Spec: "floor_to_interval respects byte-for-byte H1" ---
+
+    #[test]
+    fn floor_to_interval_h1_returns_now_unchanged() {
+        let tz: Tz = chrono_tz::UTC;
+        let now = tz.with_ymd_and_hms(2026, 4, 25, 14, 23, 17).unwrap();
+        assert_eq!(floor_to_interval(now, 60), now);
+    }
+
+    #[test]
+    fn floor_to_interval_m30_floors_to_half_hour() {
+        let tz: Tz = chrono_tz::UTC;
+        let now = tz.with_ymd_and_hms(2026, 4, 25, 14, 47, 33).unwrap();
+        let expected = tz.with_ymd_and_hms(2026, 4, 25, 14, 30, 0).unwrap();
+        assert_eq!(floor_to_interval(now, 30), expected);
+    }
+
+    #[test]
+    fn floor_to_interval_m15_floors_to_quarter_hour() {
+        let tz: Tz = chrono_tz::UTC;
+        let now = tz.with_ymd_and_hms(2026, 4, 25, 14, 23, 17).unwrap();
+        let expected = tz.with_ymd_and_hms(2026, 4, 25, 14, 15, 0).unwrap();
+        assert_eq!(floor_to_interval(now, 15), expected);
+    }
+
+    // --- Spec: "60-minute interval is byte-for-byte identical to today" /
+    //          "Hour row renders a tick on intermediate cells" /
+    //          "Sub row renders superscript minute markers on intermediate cells" ---
+
+    fn params_for(
+        now_tz: chrono::DateTime<Tz>,
+        selected_dt: chrono::DateTime<Tz>,
+        interval_minutes: i32,
+        num_cells: i32,
+        use_24h: bool,
+        offset_m: i32,
+    ) -> TimelineParams {
+        let selected_idx = num_cells / 2;
+        TimelineParams {
+            base_dt: selected_dt,
+            cell_offset: 0,
+            num_cells,
+            selected_idx,
+            current_idx: selected_idx,
+            interval_minutes,
+            cell_w: CELL_WIDTH as usize,
+            use_24h,
+            offset_m,
+            now_tz,
+            shading: None,
+        }
+    }
+
+    /// 8.1 — At H1 the UTC row hour text contains plain hour digits and the
+    /// sub-row is blank in 24h mode (no `·`, no `⁰⁰`, no superscripts).
+    #[test]
+    fn h1_utc_row_is_byte_for_byte_legacy() {
+        let tz: Tz = chrono_tz::UTC;
+        let now_tz = tz.with_ymd_and_hms(2026, 4, 25, 14, 0, 0).unwrap();
+        let p = params_for(now_tz, now_tz, 60, 8, true, 0);
+
+        let hour = spans_to_string(&build_hour_spans(&p));
+        assert!(
+            !hour.contains('·'),
+            "H1 hour row must not contain `·`, got: '{hour}'"
+        );
+
+        let sub = spans_to_string(&build_ampm_spans(&p));
+        assert!(
+            !sub.contains("⁰⁰") && !sub.contains("¹⁵") && !sub.contains("³⁰") && !sub.contains("⁴⁵"),
+            "H1 24h whole-hour zone sub-row must be blank (legacy), got: '{sub}'"
+        );
+        // Sub-row is purely whitespace in this configuration.
+        assert!(
+            sub.chars().all(char::is_whitespace),
+            "H1 24h whole-hour sub-row should be whitespace only, got: '{sub}'"
+        );
+    }
+
+    /// 8.2 — At M15 the UTC row hour text shows `· · ·` between consecutive
+    /// hour digits. The sub-row shows only intermediate markers `¹⁵ ³⁰ ⁴⁵`;
+    /// hour cells of 24h whole-hour zones stay blank (no `⁰⁰`) for visual
+    /// contrast — the hour digit on the row above already marks the slot.
+    #[test]
+    fn m15_utc_row_has_three_intermediates_and_minute_markers() {
+        let tz: Tz = chrono_tz::UTC;
+        let now_tz = tz.with_ymd_and_hms(2026, 4, 25, 14, 0, 0).unwrap();
+        // 8 cells × 15 min = 2 hours window, selected at center (14:00).
+        let p = params_for(now_tz, now_tz, 15, 8, true, 0);
+
+        let hour = spans_to_string(&build_hour_spans(&p));
+        // Between two consecutive hour cells we expect exactly 3 `·` ticks.
+        // Each cell is 3 chars wide so ticks are separated by 2 spaces.
+        assert!(
+            hour.contains("·  ·  ·"),
+            "M15 hour row should contain three consecutive `·` ticks between hour digits, got: '{hour}'"
+        );
+        // Sanity: total ticks in the 8-cell window = (8 - 2 hour cells) = 6.
+        assert_eq!(
+            hour.matches('·').count(),
+            6,
+            "expected 6 intermediate ticks across the M15 8-cell window, got: '{hour}'"
+        );
+
+        let sub = spans_to_string(&build_ampm_spans(&p));
+        // Hour cells (whole-hour 24h zone) stay blank: no ⁰⁰ in sub-row.
+        assert!(
+            !sub.contains("⁰⁰"),
+            "M15 24h whole-hour sub-row must NOT contain `⁰⁰` on hour cells, got: '{sub}'"
+        );
+        for marker in ["¹⁵", "³⁰", "⁴⁵"] {
+            assert!(
+                sub.contains(marker),
+                "M15 sub-row should contain intermediate '{marker}', got: '{sub}'"
+            );
+        }
+        // Order check: ¹⁵ then ³⁰ then ⁴⁵.
+        let p15 = sub.find("¹⁵").unwrap();
+        let p30 = sub.find("³⁰").unwrap();
+        let p45 = sub.find("⁴⁵").unwrap();
+        assert!(p15 < p30 && p30 < p45, "ordered markers expected, got: '{sub}'");
+    }
+
+    /// 8.3 — At M15 a Nepal-like row (offset_m = 45) keeps `⁴⁵` on hour cells
+    /// and shows `⁰⁰ ¹⁵ ³⁰` on the three intermediate cells. The `⁰⁰` on the
+    /// `:00` intermediate is intentional: the hour row above only shows a
+    /// `·` tick on intermediate cells (no hour digit), so the sub-row needs
+    /// to mark the natural hour boundary explicitly.
+    #[test]
+    fn m15_nepal_row_keeps_45_on_hour_cells() {
+        let tz: Tz = chrono_tz::UTC;
+        // We use UTC's wall clock but lie that offset_m = 45 so that hour
+        // cells live at minute :45 (matching Nepal +5:45 semantics).
+        let now_tz = tz.with_ymd_and_hms(2026, 4, 25, 10, 45, 0).unwrap();
+        let p = params_for(now_tz, now_tz, 15, 8, true, 45);
+
+        let sub = spans_to_string(&build_ampm_spans(&p));
+        // Two hour cells in the window each emit ⁴⁵ on the sub-row.
+        assert!(
+            sub.matches("⁴⁵").count() >= 2,
+            "M15 Nepal sub-row should keep ⁴⁵ on hour cells (≥2 occurrences), got: '{sub}'"
+        );
+        for marker in ["⁰⁰", "¹⁵", "³⁰"] {
+            assert!(
+                sub.contains(marker),
+                "M15 Nepal sub-row should contain intermediate '{marker}', got: '{sub}'"
+            );
+        }
+
+        let hour = spans_to_string(&build_hour_spans(&p));
+        assert!(
+            hour.contains("·  ·  ·"),
+            "M15 Nepal hour row should still show three intermediate ticks, got: '{hour}'"
+        );
+    }
+
+    /// Regression for the M30 + quarter-hour-zone bug: Nepal-like row
+    /// (`offset_m = 45`) at M30 must still show one hour digit per hour
+    /// (on the `:30` cells), with `·` ticks on intermediate `:00` cells
+    /// and `⁰⁰` markers on the sub-row of those intermediate cells. The
+    /// hour cells keep their existing `⁴⁵` glyph in 24h mode so column
+    /// alignment with whole-hour zones is preserved.
+    #[test]
+    fn m30_nepal_row_shows_hour_digits_on_30_cells() {
+        let tz: Tz = chrono_tz::UTC;
+        // Anchor at :30 wall (a "fake Nepal" cell at minute 30 representing
+        // the [:30, :00 next) window that contains the natural :45 boundary).
+        let now_tz = tz.with_ymd_and_hms(2026, 4, 25, 14, 30, 0).unwrap();
+        let p = params_for(now_tz, now_tz, 30, 8, true, 45);
+
+        let hour = spans_to_string(&build_hour_spans(&p));
+        // Must contain at least one wall-hour digit (regression: previously
+        // the row was 100% ticks because `is_hour_cell` never matched).
+        let has_digits = hour.chars().any(|c| c.is_ascii_digit());
+        assert!(
+            has_digits,
+            "M30 Nepal hour row must show wall-hour digits, got: '{hour}'"
+        );
+        // Tick count = number of intermediate (`:00`) cells = num_cells / 2.
+        assert_eq!(
+            hour.matches('·').count(),
+            (p.num_cells / 2) as usize,
+            "M30 Nepal: expected one tick per `:00` intermediate cell, got: '{hour}'"
+        );
+
+        let sub = spans_to_string(&build_ampm_spans(&p));
+        // Hour cells (`:30`) keep ⁴⁵ marker.
+        assert!(
+            sub.contains("⁴⁵"),
+            "M30 Nepal sub-row should keep ⁴⁵ on hour cells, got: '{sub}'"
+        );
+        // Intermediate cells at wall :00 show ⁰⁰ superscript so the sub-row
+        // marks the natural hour boundary that the `·` tick above does not.
+        assert!(
+            sub.contains("⁰⁰"),
+            "M30 Nepal sub-row should show ⁰⁰ on intermediate `:00` cells, got: '{sub}'"
+        );
+    }
+
+    /// 8.4 — At M15 in 12h mode (San Jose) hour cells keep am/pm and
+    /// intermediate cells show wall-clock minute superscripts.
+    #[test]
+    fn m15_12h_row_keeps_ampm_on_hour_cells() {
+        let tz: Tz = chrono_tz::UTC; // wall-clock chosen for simplicity
+        let now_tz = tz.with_ymd_and_hms(2026, 4, 25, 14, 0, 0).unwrap();
+        let p = params_for(now_tz, now_tz, 15, 8, false, 0);
+
+        let sub = spans_to_string(&build_ampm_spans(&p));
+        // 14:00 → "pm" on the hour cells; should appear at least once.
+        assert!(
+            sub.contains("pm") || sub.contains("am"),
+            "M15 12h sub-row should keep am/pm on hour cells, got: '{sub}'"
+        );
+        for marker in ["¹⁵", "³⁰", "⁴⁵"] {
+            assert!(
+                sub.contains(marker),
+                "M15 12h sub-row should contain intermediate '{marker}', got: '{sub}'"
+            );
+        }
     }
 }

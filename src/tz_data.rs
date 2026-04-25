@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use chrono::{Datelike, NaiveDate, TimeZone, Utc};
+use chrono::{Datelike, NaiveDate, Offset, TimeZone, Utc};
 use chrono_tz::{OffsetName, Tz, TZ_VARIANTS};
 
 // ---------------------------------------------------------------------------
@@ -83,8 +83,84 @@ fn build_abbreviation_map() -> HashMap<String, Tz> {
     }
 
     map.insert("UTC".to_string(), Tz::UTC);
+
+    // Curated fallback: insert canonical abbreviations for zones whose IANA
+    // tzdata format string is numeric (so chrono-tz exposes no named
+    // abbreviation, e.g. NPT for Asia/Kathmandu, MMT for Asia/Yangon).
+    // Walk modern IANA ids first so legacy aliases (e.g. Asia/Rangoon,
+    // NZ-CHAT) don't claim the slot through non-deterministic iteration.
+    let mut canonical_insert = |tz: Tz| {
+        for nd in [winter, summer] {
+            if let Some(dt) = tz.from_local_datetime(&nd).earliest() {
+                if dt.offset().abbreviation().is_some() {
+                    continue;
+                }
+                let utc_offset_minutes = dt.offset().fix().local_minus_utc() / 60;
+                if let Some(abbr) = canonical_abbreviation(tz.name(), utc_offset_minutes) {
+                    map.entry(abbr.to_uppercase()).or_insert(tz);
+                }
+            }
+        }
+    };
+    for &tz in CANONICAL_FALLBACK_PREFERRED {
+        canonical_insert(tz);
+    }
+    for &tz in &TZ_VARIANTS {
+        canonical_insert(tz);
+    }
+
     map
 }
+
+/// Modern IANA zones to consider first when registering the curated
+/// `canonical_abbreviation` fallback. Ensures the modern name wins over a
+/// legacy alias (e.g. `Asia/Yangon` over `Asia/Rangoon`).
+const CANONICAL_FALLBACK_PREFERRED: &[Tz] = &[
+    Tz::Asia__Kathmandu,
+    Tz::Asia__Yangon,
+    Tz::Asia__Tehran,
+    Tz::Asia__Kabul,
+    Tz::Asia__Yerevan,
+    Tz::Asia__Singapore,
+    Tz::Asia__Almaty,
+    Tz::Indian__Mahe,
+    Tz::Indian__Mauritius,
+    Tz::Indian__Reunion,
+    Tz::Indian__Chagos,
+    Tz::Indian__Maldives,
+    Tz::Indian__Christmas,
+    Tz::Indian__Cocos,
+    Tz::Indian__Kerguelen,
+    Tz::Pacific__Marquesas,
+    Tz::Pacific__Chatham,
+    Tz::Pacific__Norfolk,
+    Tz::Pacific__Niue,
+    Tz::Pacific__Tongatapu,
+    Tz::Pacific__Fiji,
+    Tz::Pacific__Tahiti,
+    Tz::Pacific__Gambier,
+    Tz::Pacific__Easter,
+    Tz::Pacific__Galapagos,
+    Tz::Pacific__Apia,
+    Tz::Pacific__Port_Moresby,
+    Tz::Pacific__Palau,
+    Tz::Pacific__Kwajalein,
+    Tz::Pacific__Majuro,
+    Tz::Pacific__Tarawa,
+    Tz::Pacific__Funafuti,
+    Tz::Pacific__Nauru,
+    Tz::Pacific__Wake,
+    Tz::Pacific__Wallis,
+    Tz::Pacific__Kiritimati,
+    Tz::Pacific__Kanton,
+    Tz::Australia__Eucla,
+    Tz::Australia__Lord_Howe,
+    Tz::Atlantic__Azores,
+    Tz::Atlantic__Cape_Verde,
+    Tz::Atlantic__Stanley,
+    Tz::America__Rio_Branco,
+    Tz::America__Noronha,
+];
 
 static ABBR_MAP: LazyLock<HashMap<String, Tz>> = LazyLock::new(build_abbreviation_map);
 
@@ -93,6 +169,109 @@ pub fn lookup_abbreviation(abbr: &str) -> Option<ResolvedTz> {
     let iana = tz.name();
     let (city, region) = city_and_region(iana);
     Some(ResolvedTz { tz, city, region })
+}
+
+// ---------------------------------------------------------------------------
+// Display abbreviation: friendly fallback for zones whose chrono-tz output
+// is a numeric `+HHMM` placeholder (because the IANA tzdata format string
+// uses `%z`). Curated from the IANA abbreviation conventions and Wikipedia's
+// "List of time zone abbreviations". Only zones with a widely recognized
+// abbreviation are included; collision-prone or genuinely numeric zones
+// (e.g. `Etc/GMT*`, several Pacific atolls) intentionally fall through.
+// ---------------------------------------------------------------------------
+
+/// Returns a canonical, human-friendly abbreviation for `(iana_id, utc_offset_minutes)`,
+/// where `utc_offset_minutes` is the signed `local - UTC` offset in minutes
+/// (used to disambiguate standard vs DST variants of the same zone).
+pub fn canonical_abbreviation(iana_id: &str, utc_offset_minutes: i32) -> Option<&'static str> {
+    match (iana_id, utc_offset_minutes) {
+        // ── Asia ──
+        ("Asia/Kathmandu", 345) => Some("NPT"),
+        ("Asia/Yangon" | "Asia/Rangoon", 390) => Some("MMT"),
+        ("Asia/Tehran" | "Iran", 210) => Some("IRST"),
+        ("Asia/Tehran" | "Iran", 270) => Some("IRDT"),
+        ("Asia/Kabul", 270) => Some("AFT"),
+        ("Asia/Yerevan", 240) => Some("AMT"),
+        ("Asia/Singapore" | "Singapore", 480) => Some("SGT"),
+        ("Asia/Almaty", 300) => Some("ALMT"),
+
+        // ── Indian Ocean ──
+        ("Indian/Mahe", 240) => Some("SCT"),
+        ("Indian/Mauritius", 240) => Some("MUT"),
+        ("Indian/Reunion", 240) => Some("RET"),
+        ("Indian/Chagos", 360) => Some("IOT"),
+        ("Indian/Maldives", 300) => Some("MVT"),
+        ("Indian/Christmas", 420) => Some("CXT"),
+        ("Indian/Cocos", 390) => Some("CCT"),
+        ("Indian/Kerguelen", 300) => Some("TFT"),
+
+        // ── Pacific ──
+        ("Pacific/Marquesas", -570) => Some("MART"),
+        ("Pacific/Chatham" | "NZ-CHAT", 765) => Some("CHAST"),
+        ("Pacific/Chatham" | "NZ-CHAT", 825) => Some("CHADT"),
+        ("Pacific/Norfolk", 660) => Some("NFT"),
+        ("Pacific/Norfolk", 720) => Some("NFDT"),
+        ("Pacific/Niue", -660) => Some("NUT"),
+        ("Pacific/Tongatapu", 780) => Some("TOT"),
+        ("Pacific/Fiji", 720) => Some("FJT"),
+        ("Pacific/Fiji", 780) => Some("FJST"),
+        ("Pacific/Tahiti", -600) => Some("TAHT"),
+        ("Pacific/Gambier", -540) => Some("GAMT"),
+        ("Pacific/Easter", -360) => Some("EAST"),
+        ("Pacific/Easter", -300) => Some("EASST"),
+        ("Pacific/Galapagos", -360) => Some("GALT"),
+        ("Pacific/Apia", 780) => Some("WSST"),
+        ("Pacific/Apia", 840) => Some("WSDT"),
+        ("Pacific/Port_Moresby", 600) => Some("PGT"),
+        ("Pacific/Palau", 540) => Some("PWT"),
+        (
+            "Pacific/Kwajalein" | "Pacific/Majuro" | "Kwajalein",
+            720,
+        ) => Some("MHT"),
+        ("Pacific/Tarawa", 720) => Some("GILT"),
+        ("Pacific/Funafuti", 720) => Some("TVT"),
+        ("Pacific/Nauru", 720) => Some("NRT"),
+        ("Pacific/Wake", 720) => Some("WAKT"),
+        ("Pacific/Wallis", 720) => Some("WFT"),
+        ("Pacific/Kiritimati", 840) => Some("LINT"),
+        (
+            "Pacific/Enderbury" | "Pacific/Kanton" | "Pacific/Fakaofo",
+            780,
+        ) => Some("PHOT"),
+
+        // ── Australia ──
+        ("Australia/Eucla", 525) => Some("ACWST"),
+        ("Australia/Lord_Howe" | "Australia/LHI", 630) => Some("LHST"),
+        ("Australia/Lord_Howe" | "Australia/LHI", 660) => Some("LHDT"),
+
+        // ── Atlantic ──
+        ("Atlantic/Azores", -60) => Some("AZOT"),
+        ("Atlantic/Azores", 0) => Some("AZOST"),
+        ("Atlantic/Cape_Verde", -60) => Some("CVT"),
+        ("Atlantic/Stanley", -180) => Some("FKST"),
+
+        // ── Americas ──
+        ("America/Rio_Branco" | "Brazil/Acre", -300) => Some("ACT"),
+        ("America/Noronha" | "Brazil/DeNoronha", -120) => Some("FNT"),
+
+        _ => None,
+    }
+}
+
+/// Format `dt`'s timezone abbreviation for display. Prefers chrono-tz's
+/// named abbreviation (`%Z`) when available; falls back to
+/// [`canonical_abbreviation`] for IANA zones whose tzdata format is numeric;
+/// finally falls back to the numeric `+HHMM` form itself.
+pub fn display_abbreviation(dt: &chrono::DateTime<Tz>) -> String {
+    let raw = dt.format("%Z").to_string();
+    if !(raw.starts_with('+') || raw.starts_with('-')) {
+        return raw;
+    }
+    let iana = dt.timezone().name();
+    let utc_offset_minutes = dt.offset().fix().local_minus_utc() / 60;
+    canonical_abbreviation(iana, utc_offset_minutes)
+        .map(str::to_owned)
+        .unwrap_or(raw)
 }
 
 // ---------------------------------------------------------------------------
@@ -859,6 +1038,92 @@ mod tests {
     fn abbreviation_unknown_returns_none() {
         assert!(lookup_abbreviation("XYZ").is_none());
     }
+
+    // --- display_abbreviation: friendly fallback for numeric chrono-tz output ---
+
+    fn dt_at(iana: &str, year: i32, month: u32, day: u32) -> chrono::DateTime<Tz> {
+        let tz: Tz = iana.parse().unwrap();
+        let nd = chrono::NaiveDate::from_ymd_opt(year, month, day)
+            .unwrap()
+            .and_hms_opt(12, 0, 0)
+            .unwrap();
+        tz.from_local_datetime(&nd).earliest().unwrap()
+    }
+
+    #[test]
+    fn display_abbreviation_kathmandu_is_npt() {
+        let dt = dt_at("Asia/Kathmandu", 2026, 7, 15);
+        assert_eq!(display_abbreviation(&dt), "NPT");
+    }
+
+    #[test]
+    fn display_abbreviation_named_zone_passthrough() {
+        // Asia/Kolkata exposes a real "IST" via chrono-tz; we should not override it.
+        let dt = dt_at("Asia/Kolkata", 2026, 7, 15);
+        assert_eq!(display_abbreviation(&dt), "IST");
+    }
+
+    #[test]
+    fn display_abbreviation_unknown_zone_falls_back_to_numeric() {
+        // Etc/GMT+10 is genuinely numeric and not in the curated override list,
+        // so we should preserve chrono-tz's `-10` output.
+        let dt = dt_at("Etc/GMT+10", 2026, 1, 15);
+        assert_eq!(display_abbreviation(&dt), "-10");
+    }
+
+    #[test]
+    fn display_abbreviation_marquesas_is_mart() {
+        let dt = dt_at("Pacific/Marquesas", 2026, 7, 15);
+        assert_eq!(display_abbreviation(&dt), "MART");
+    }
+
+    // --- Canonical fallback also registers as input abbreviation ---
+
+    #[test]
+    fn abbreviation_npt_resolves_to_kathmandu() {
+        let r = lookup_abbreviation("NPT").expect("NPT should resolve");
+        assert_eq!(r.tz.name(), "Asia/Kathmandu");
+    }
+
+    #[test]
+    fn abbreviation_mmt_resolves_to_yangon() {
+        let r = lookup_abbreviation("MMT").expect("MMT should resolve");
+        assert_eq!(r.tz.name(), "Asia/Yangon");
+    }
+
+    #[test]
+    fn abbreviation_mart_resolves_to_marquesas() {
+        let r = lookup_abbreviation("MART").expect("MART should resolve");
+        assert_eq!(r.tz.name(), "Pacific/Marquesas");
+    }
+
+    #[test]
+    fn abbreviation_acwst_resolves_to_eucla() {
+        let r = lookup_abbreviation("ACWST").expect("ACWST should resolve");
+        assert_eq!(r.tz.name(), "Australia/Eucla");
+    }
+
+    #[test]
+    fn abbreviation_chast_resolves_to_chatham() {
+        let r = lookup_abbreviation("CHAST").expect("CHAST should resolve");
+        assert_eq!(r.tz.name(), "Pacific/Chatham");
+    }
+
+    #[test]
+    fn abbreviation_canonical_fallback_case_insensitive() {
+        let r = lookup_abbreviation("npt").expect("npt should resolve");
+        assert_eq!(r.tz.name(), "Asia/Kathmandu");
+    }
+
+    #[test]
+    fn display_abbreviation_chatham_disambiguates_dst() {
+        // Chatham uses +12:45 (CHAST) in jul, +13:45 (CHADT) in jan (NZ DST).
+        let dt_winter = dt_at("Pacific/Chatham", 2026, 7, 15);
+        assert_eq!(display_abbreviation(&dt_winter), "CHAST");
+        let dt_summer = dt_at("Pacific/Chatham", 2026, 1, 15);
+        assert_eq!(display_abbreviation(&dt_summer), "CHADT");
+    }
+
 
     // --- City name resolution (from spec: "Add timezone by city name") ---
 

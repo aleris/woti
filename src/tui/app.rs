@@ -11,30 +11,39 @@ use ratatui::Terminal;
 
 use crate::config::{AppConfig, TimeFormat};
 
-use super::BLOCK_HEIGHT;
+use super::{BLOCK_HEIGHT, NavInterval};
 
 pub struct App {
     pub(super) config: AppConfig,
     pub(super) anchor_time: Option<DateTime<Utc>>,
-    pub(super) hour_offset: i32,
+    /// Selected cell offset relative to the "now" cell. Each cell represents
+    /// `interval.minutes()` minutes, so the selected absolute time offset in
+    /// minutes is `cell_offset * interval.minutes()`.
+    pub(super) cell_offset: i32,
     pub(super) scroll_offset: usize,
     pub(super) time_format: TimeFormat,
     pub(super) shading_enabled: bool,
+    pub(super) interval: NavInterval,
     pub(super) should_quit: bool,
     pub(super) copied_at: Option<Instant>,
 }
 
 impl App {
-    pub fn new(config: AppConfig, anchor_time: Option<DateTime<Utc>>) -> Self {
+    pub fn new(
+        config: AppConfig,
+        anchor_time: Option<DateTime<Utc>>,
+        interval: NavInterval,
+    ) -> Self {
         let time_format = config.time_format.unwrap_or(TimeFormat::Mixed);
         let shading_enabled = config.working_hours.enabled;
         Self {
             config,
             anchor_time,
-            hour_offset: 0,
+            cell_offset: 0,
             scroll_offset: 0,
             time_format,
             shading_enabled,
+            interval,
             should_quit: false,
             copied_at: None,
         }
@@ -73,3 +82,4 @@ impl App {
         result
     }
 }
+

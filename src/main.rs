@@ -9,12 +9,17 @@ use clap::Parser;
 
 use cli::{Cli, Command};
 use config::AppConfig;
+use tui::NavInterval;
 
 fn main() {
     let cli = Cli::parse();
 
-    if cli.command.is_some() && (cli.date.is_some() || cli.time.is_some()) {
-        eprintln!("error: --date and --time can only be used when launching the TUI (without a subcommand)");
+    if cli.command.is_some()
+        && (cli.date.is_some() || cli.time.is_some() || cli.interval.is_some())
+    {
+        eprintln!(
+            "error: --date, --time and --interval can only be used when launching the TUI (without a subcommand)"
+        );
         std::process::exit(2);
     }
 
@@ -33,9 +38,16 @@ fn main() {
         }
         None => {
             let anchor = parse_anchor(cli.date.as_deref(), cli.time.as_deref());
-            cmd_tui(anchor);
+            let interval_override = cli.interval.as_deref().map(parse_interval_flag);
+            cmd_tui(anchor, interval_override);
         }
     }
+}
+
+/// Parse `--interval` value (already constrained by clap to "60"|"30"|"15") into `NavInterval`.
+fn parse_interval_flag(s: &str) -> NavInterval {
+    let m: u32 = s.parse().expect("clap value_parser guarantees a valid u32");
+    NavInterval::from_minutes(m).expect("clap value_parser guarantees a supported interval")
 }
 
 fn parse_anchor(date: Option<&str>, time: Option<&str>) -> Option<DateTime<Utc>> {
@@ -175,14 +187,16 @@ fn cmd_print(anchor: Option<DateTime<Utc>>) {
         &config.timezones,
         reference_utc,
         0,
+        60,
         &|iana_id| tui::use_24h_for_format(time_format, iana_id),
     );
     println!("{text}");
 }
 
-fn cmd_tui(anchor: Option<DateTime<Utc>>) {
+fn cmd_tui(anchor: Option<DateTime<Utc>>, interval_override: Option<NavInterval>) {
     let config = AppConfig::load();
-    let mut app = tui::App::new(config, anchor);
+    let interval = tui::resolve_launch_interval(interval_override, config.interval);
+    let mut app = tui::App::new(config, anchor, interval);
     if let Err(e) = app.run() {
         eprintln!("TUI error: {e}");
         std::process::exit(1);
