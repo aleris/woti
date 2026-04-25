@@ -1,17 +1,4 @@
-### Requirement: TimelineParams carries timezone minute offset
-The `TimelineParams` struct SHALL include an `offset_m` field representing the minute component (0, 30, or 45) of the timezone's UTC offset. It SHALL be computed from `now_tz.offset().fix().local_minus_utc()` and passed to all timeline span builders.
-
-#### Scenario: Whole-hour timezone
-- **WHEN** a timezone has offset +5:00 (offset_m = 0)
-- **THEN** `TimelineParams.offset_m` is 0
-
-#### Scenario: Half-hour timezone
-- **WHEN** a timezone has offset +5:30 (offset_m = 30)
-- **THEN** `TimelineParams.offset_m` is 30
-
-#### Scenario: Quarter-hour timezone
-- **WHEN** a timezone has offset +5:45 (offset_m = 45)
-- **THEN** `TimelineParams.offset_m` is 45
+## MODIFIED Requirements
 
 ### Requirement: Sub-row shows superscript minutes in 24h mode for fractional-offset timezones
 When `use_24h` is true and `offset_m` is non-zero, the sub-row (built by `build_ampm_spans`) SHALL display the minute offset as Unicode superscript digits in each hour cell's 2-char content slot. With a sub-hour active interval (see `sub-hour-nav-interval`), intermediate (non-hour) cells SHALL display the wall-clock minute of the cell's datetime as superscript digits, independent of `offset_m`.
@@ -66,14 +53,3 @@ When `use_24h` is false and `offset_m` is non-zero, the sub-row SHALL display a 
 #### Scenario: 12h mode with 30-minute offset, sub-hour interval
 - **WHEN** `use_24h` is false, `offset_m` is 30, and the active interval is 15 minutes
 - **THEN** hour-cell sub-row content remains `"½a"`/`"½p"` and intermediate cells display superscript wall-clock minutes (e.g. `"⁴⁵"`, `"⁰⁰"`, `"¹⁵"`)
-
-### Requirement: Fractional indicator styling matches existing sub-row styling
-The fractional-hour indicator text SHALL use the same style cascade as the current am/pm text: selected_style when the cell is selected, local_style with DarkGray foreground when the cell is the local hour, and DarkGray + DIM otherwise.
-
-#### Scenario: Selected cell with fractional indicator
-- **WHEN** a half-hour timezone cell is the selected hour
-- **THEN** the sub-row indicator uses `selected_style()` (black on yellow, bold)
-
-#### Scenario: Local cell with fractional indicator
-- **WHEN** a half-hour timezone cell is the local hour and hour_offset != 0
-- **THEN** the sub-row indicator uses `local_style()` with DarkGray foreground

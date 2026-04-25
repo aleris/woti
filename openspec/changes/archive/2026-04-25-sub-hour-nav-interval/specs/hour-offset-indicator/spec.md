@@ -1,3 +1,5 @@
+## MODIFIED Requirements
+
 ### Requirement: Relative offset label is displayed when selection is not current hour
 
 The system SHALL render a single indicator row below all timezone blocks that displays a human-readable string describing how far the selection is from the current time. The row SHALL only be visible when the selection is non-zero (i.e. `cell_offset != 0`, equivalent to `selected_offset_minutes != 0`). The label SHALL express the offset using the most natural unit combination for the active interval:
@@ -47,16 +49,6 @@ Singular/plural rules SHALL apply to each unit independently ("1 hour", "2 hours
 #### Scenario: Selection is the current cell
 - **WHEN** `selected_offset_minutes == 0`
 - **THEN** no indicator row is rendered
-
-### Requirement: Indicator uses selection color
-
-The indicator label SHALL be styled with the same foreground and background colors as the selected cell (`SELECTED_FG` /
-`SELECTED_BG`, bold).
-
-#### Scenario: Style matches selected column
-
-- **WHEN** the indicator row is visible
-- **THEN** the label span uses `selected_style()` (fg: `SELECTED_FG`, bg: `SELECTED_BG`, bold)
 
 ### Requirement: Indicator is horizontally aligned with selected column
 

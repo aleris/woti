@@ -44,11 +44,12 @@ Local and UTC are preconfigured by default. Configuration is stored in `~/.confi
 
 ### TUI controls
 
-- `←` / `→`: scroll the timeline by hour
+- `←` / `→`: scroll the timeline by one cell (60, 30, or 15 minutes depending on `i`)
 - `↑` / `↓`: scroll timezone list
-- `c`: copy the current selected hours column to clipboard
+- `c`: copy the current selected column to clipboard
 - `w`: turn workday hours shading on/off
 - `f`: cycle time format (mixed -> am/pm -> 24h → …)
+- `i`: cycle navigation interval (60 → 30 → 15 → …) — the choice is persisted
 - `q` / `x` / `Esc`, `ctrl+c`: exit
 
 In **mixed** mode, 12h/24h is chosen per timezone based on the country's convention
@@ -87,7 +88,29 @@ woti --date 2026-04-15 --time 14:00  # April 15 at 2pm
 ```
 
 When pinned, the clock does not advance - the displayed time stays fixed. 
-Left/Right arrow navigation still shifts by hour relative to the pinned time.
+Left/Right arrow navigation still shifts by one cell (60, 30, or 15 minutes — see below)
+relative to the pinned time.
+
+### Navigation interval
+
+By default each timeline cell represents one hour. Switch to finer granularity with the
+`i` shortcut in the TUI or with the `--interval` flag at launch:
+
+```sh
+woti --interval 30   # Launch with 30-minute cells
+woti --interval 15   # Launch with 15-minute cells
+```
+
+- The `i` key inside the TUI cycles `60 → 30 → 15 → 60` and **persists** the choice to
+  `config.toml` (same as `f` and `w`).
+- `--interval` is a **session-only** override that does not modify the saved config
+  (same as `--date` / `--time`).
+- At 30/15-minute intervals each hour cell gains 1 or 3 intermediate ticks; the sub-row
+  shows minute markers as superscript digits (`¹⁵ ³⁰ ⁴⁵`). For whole-hour timezones the
+  hour cell sub-row stays blank (the hour digit above marks the slot). For fractional
+  zones (Nepal `+5:45`, India `+5:30`, …) the intermediate cell that lands on wall `:00`
+  shows `⁰⁰`, since the row above only shows a `·` tick there. At 60 minutes the view
+  is byte-for-byte identical to earlier versions.
 
 ### Configuration
 

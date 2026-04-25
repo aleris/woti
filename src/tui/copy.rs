@@ -1,40 +1,65 @@
 use std::time::Instant;
 
-use chrono::{DateTime, Datelike, Offset, Timelike, Utc};
+use chrono::{DateTime, Datelike, Duration, Offset, Timelike, Utc};
 use chrono_tz::Tz;
 
 use crate::config::TimezoneEntry;
 
 use super::app::App;
-use super::render::compute_datetime_for_hour;
 
+/// Floor a UTC datetime to the most recent boundary of `interval_minutes`.
+/// Flooring in UTC (rather than in each timezone's wall clock) preserves the
+/// legacy copy semantics where Kolkata renders `:30`, Nepal `:45`, and UTC
+/// `:00` — i.e. each timezone's natural minute boundary derived from its
+/// UTC offset.
+fn floor_utc_to_interval(dt: DateTime<Utc>, interval_minutes: i32) -> DateTime<Utc> {
+    let interval = interval_minutes.max(1);
+    let minute = dt.minute() as i32;
+    let floored_minute = (minute / interval) * interval;
+    let drop = minute - floored_minute;
+    dt - Duration::minutes(drop as i64)
+        - Duration::seconds(dt.second() as i64)
+        - Duration::nanoseconds(dt.nanosecond() as i64)
+}
+
+/// Build the copy/print text for the configured timezones at
+/// `reference_utc + offset_minutes`, snapped to the active `interval_minutes`
+/// grid (in UTC). The default H1 path (`interval_minutes = 60`) reproduces
+/// the legacy "show wall hour with timezone-natural minute" output
+/// byte-for-byte.
 pub fn build_copy_text(
     timezones: &[TimezoneEntry],
     reference_utc: DateTime<Utc>,
-    hour_offset: i32,
+    offset_minutes: i32,
+    interval_minutes: i32,
     use_24h_for_tz: &dyn Fn(&str) -> bool,
 ) -> String {
     let mut lines = Vec::new();
     let mut ref_date: Option<chrono::NaiveDate> = None;
 
+    let anchor_utc = floor_utc_to_interval(reference_utc, interval_minutes)
+        + Duration::minutes(offset_minutes as i64);
+
     for entry in timezones {
         let tz: Tz = entry.iana_id.parse().unwrap_or(chrono_tz::UTC);
+        let selected_dt = anchor_utc.with_timezone(&tz);
         let now_tz = reference_utc.with_timezone(&tz);
-        let selected_dt = compute_datetime_for_hour(tz, now_tz, hour_offset);
+        let _ = now_tz;
 
-        let tz_abbr = selected_dt.format("%Z").to_string();
+        let tz_abbr = crate::tz_data::display_abbreviation(&selected_dt);
         let hour_in_day = selected_dt.hour();
-        let offset_m = (selected_dt.offset().fix().local_minus_utc().abs() % 3600) / 60;
+        let actual_minute = selected_dt.minute() as i32;
+        let _ = (selected_dt.offset().fix().local_minus_utc().abs() % 3600) / 60;
 
         let use_24h = use_24h_for_tz(&entry.iana_id);
         let time_str = if use_24h {
-            format!("{:02}:{:02}", hour_in_day, offset_m)
+            format!("{:02}:{:02}", hour_in_day, actual_minute)
         } else {
             let h12 = hour_in_day % 12;
             let h12 = if h12 == 0 { 12 } else { h12 };
             let ampm = if hour_in_day < 12 { "am" } else { "pm" };
-            if offset_m != 0 {
-                format!("{}:{:02}{}", h12, offset_m, ampm)
+            if actual_minute != 0 {
+                format!("{}:{:02}{}", h12, actual_minute, ampm)
             } else {
                 format!("{}{}", h12, ampm)
             }
@@ -86,10 +111,13 @@ impl App {
     pub(super) fn build_copy_text(&self) -> String {
         let reference_utc = self.reference_time();
         let time_format = self.time_format;
+        let interval_minutes = self.interval.minutes() as i32;
+        let offset_minutes = self.cell_offset * interval_minutes;
         build_copy_text(
             &self.config.timezones,
             reference_utc,
-            self.hour_offset,
+            offset_minutes,
+            interval_minutes,
             &|iana_id| Self::use_24h_static(time_format, iana_id),
         )
     }
@@ -97,25 +125,26 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::{AppConfig, TimeFormat, TimezoneEntry, WorkingHoursConfig};
+    use crate::config::{AppConfig, DEFAULT_INTERVAL_MINUTES, TimeFormat, TimezoneEntry, WorkingHoursConfig};
     use super::super::app::App;
+    use super::super::NavInterval;
 
     fn app_with(entries: Vec<TimezoneEntry>, format: TimeFormat) -> App {
+        app_with_interval(entries, format, NavInterval::H1)
+    }
+
+    fn app_with_interval(
+        entries: Vec<TimezoneEntry>,
+        format: TimeFormat,
+        interval: NavInterval,
+    ) -> App {
         let config = AppConfig {
             timezones: entries,
             time_format: Some(format),
             working_hours: WorkingHoursConfig::default(),
+            interval: DEFAULT_INTERVAL_MINUTES,
         };
-        App {
-            config,
-            anchor_time: None,
-            hour_offset: 0,
-            scroll_offset: 0,
-            time_format: format,
-            shading_enabled: true,
-            should_quit: false,
-            copied_at: None,
-        }
+        App::new(config, None, interval)
     }
 
     fn entry(iana_id: &str, city: &str) -> TimezoneEntry {
@@ -264,7 +293,7 @@ mod tests {
             ],
             TimeFormat::H24,
         );
-        app.hour_offset = hour_offset;
+        app.cell_offset = hour_offset;
         let text = app.build_copy_text();
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines.len(), 2);
@@ -306,7 +335,7 @@ mod tests {
             ],
             TimeFormat::H24,
         );
-        app.hour_offset = hour_offset;
+        app.cell_offset = hour_offset;
         let text = app.build_copy_text();
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines.len(), 2);
@@ -332,17 +361,9 @@ mod tests {
             timezones: vec![entry("UTC", "UTC")],
             time_format: Some(TimeFormat::H24),
             working_hours: WorkingHoursConfig::default(),
+            interval: DEFAULT_INTERVAL_MINUTES,
         };
-        let app = App {
-            config,
-            anchor_time: Some(anchor_utc),
-            hour_offset: 0,
-            scroll_offset: 0,
-            time_format: TimeFormat::H24,
-            shading_enabled: true,
-            should_quit: false,
-            copied_at: None,
-        };
+        let app = App::new(config, Some(anchor_utc), NavInterval::H1);
 
         let text = app.build_copy_text();
         let line = text.lines().next().unwrap();
@@ -372,22 +393,68 @@ mod tests {
             timezones: entries.clone(),
             time_format: Some(TimeFormat::H24),
             working_hours: WorkingHoursConfig::default(),
+            interval: DEFAULT_INTERVAL_MINUTES,
         };
-        let app = App {
-            config,
-            anchor_time: Some(anchor_utc),
-            hour_offset: 0,
-            scroll_offset: 0,
-            time_format: TimeFormat::H24,
-            shading_enabled: true,
-            should_quit: false,
-            copied_at: None,
-        };
+        let app = App::new(config, Some(anchor_utc), NavInterval::H1);
 
         let from_app = app.build_copy_text();
-        let from_standalone = build_copy_text(&entries, anchor_utc, 0, &|_| true);
+        let from_standalone = build_copy_text(&entries, anchor_utc, 0, 60, &|_| true);
 
         assert_eq!(from_app, from_standalone);
+    }
+
+    // --- Spec: "Sub-hour selection in copy text" ---
+
+    #[test]
+    fn m15_cell_offset_one_yields_15_minute_time() {
+        use chrono::{NaiveDate, TimeZone, Utc};
+
+        let anchor = NaiveDate::from_ymd_opt(2026, 4, 25)
+            .unwrap()
+            .and_hms_opt(14, 0, 0)
+            .unwrap();
+        let anchor_utc = Utc.from_utc_datetime(&anchor);
+
+        let mut app = app_with_interval(
+            vec![entry("UTC", "UTC")],
+            TimeFormat::H24,
+            NavInterval::M15,
+        );
+        app.anchor_time = Some(anchor_utc);
+        app.cell_offset = 1;
+
+        let text = app.build_copy_text();
+        let line = text.lines().next().unwrap();
+        assert!(
+            line.contains("14:15"),
+            "M15 + cell_offset=1 from 14:00 should yield :15, got: {line}"
+        );
+    }
+
+    #[test]
+    fn m30_cell_offset_one_yields_30_minute_time() {
+        use chrono::{NaiveDate, TimeZone, Utc};
+
+        let anchor = NaiveDate::from_ymd_opt(2026, 4, 25)
+            .unwrap()
+            .and_hms_opt(9, 0, 0)
+            .unwrap();
+        let anchor_utc = Utc.from_utc_datetime(&anchor);
+
+        let mut app = app_with_interval(
+            vec![entry("UTC", "UTC")],
+            TimeFormat::AmPm,
+            NavInterval::M30,
+        );
+        app.anchor_time = Some(anchor_utc);
+        app.cell_offset = 1;
+
+        let text = app.build_copy_text();
+        let line = text.lines().next().unwrap();
+        assert!(
+            line.contains("9:30am"),
+            "M30 + cell_offset=1 from 9:00 should yield 9:30am, got: {line}"
+        );
     }
 
     #[test]
@@ -402,7 +469,7 @@ mod tests {
         let anchor_utc = Utc.from_utc_datetime(&anchor);
 
         let entries = vec![entry("UTC", "UTC")];
-        let text = build_copy_text(&entries, anchor_utc, 0, &|_| true);
+        let text = build_copy_text(&entries, anchor_utc, 0, 60, &|_| true);
         assert!(
             text.contains("14:00"),
             "pinned at 14:00 UTC should show 14:00, got: {text}"

@@ -19,7 +19,8 @@ impl App {
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     ) -> io::Result<()> {
         let mut last_render = Instant::now();
-        let mut pending_h_offset: i32 = 0;
+        // Counts pending cell steps. One cell == self.interval.minutes() minutes.
+        let mut pending_cell_offset: i32 = 0;
         let mut nav_start: Option<Instant> = None;
         let mut nav_dir: i32 = 0;
 
@@ -27,7 +28,7 @@ impl App {
 
         loop {
             let timeout =
-                Duration::from_millis(if pending_h_offset != 0 { DEBOUNCE_MS } else { 250 });
+                Duration::from_millis(if pending_cell_offset != 0 { DEBOUNCE_MS } else { 250 });
 
             if event::poll(timeout)? {
                 match event::read()? {
@@ -51,7 +52,7 @@ impl App {
                                     nav_dir = dir;
                                 }
                                 let step = compute_step(nav_start.unwrap().elapsed());
-                                pending_h_offset -= step;
+                                pending_cell_offset -= step;
                             }
                             (KeyCode::Right, _) => {
                                 let dir = 1;
@@ -60,7 +61,7 @@ impl App {
                                     nav_dir = dir;
                                 }
                                 let step = compute_step(nav_start.unwrap().elapsed());
-                                pending_h_offset += step;
+                                pending_cell_offset += step;
                             }
                             (KeyCode::Up, _) => {
                                 nav_start = None;
@@ -105,6 +106,13 @@ impl App {
                                 terminal.draw(|f| self.render(f))?;
                                 last_render = Instant::now();
                             }
+                            (KeyCode::Char('i'), KeyModifiers::NONE) => {
+                                nav_start = None;
+                                nav_dir = 0;
+                                self.cycle_interval();
+                                terminal.draw(|f| self.render(f))?;
+                                last_render = Instant::now();
+                            }
                             _ => {
                                 nav_start = None;
                                 nav_dir = 0;
@@ -127,18 +135,18 @@ impl App {
                     return Ok(());
                 }
 
-                if pending_h_offset != 0
+                if pending_cell_offset != 0
                     && last_render.elapsed() >= Duration::from_millis(DEBOUNCE_MS)
                 {
-                    self.hour_offset += pending_h_offset;
-                    pending_h_offset = 0;
+                    self.cell_offset += pending_cell_offset;
+                    pending_cell_offset = 0;
                     terminal.draw(|f| self.render(f))?;
                     last_render = Instant::now();
                 }
             } else {
-                if pending_h_offset != 0 {
-                    self.hour_offset += pending_h_offset;
-                    pending_h_offset = 0;
+                if pending_cell_offset != 0 {
+                    self.cell_offset += pending_cell_offset;
+                    pending_cell_offset = 0;
                 } else {
                     nav_start = None;
                     nav_dir = 0;

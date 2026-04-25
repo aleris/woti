@@ -13,6 +13,8 @@ use clap::{Parser, Subcommand};
         woti --date 2026-04-15                        Launch pinned to a date, use current time\n  \
         woti --time 15:00                             Launch pinned to a time, use current date\n  \
         woti --date 2026-04-15 --time 19:00           Launch pinned to a specific date time\n  \
+        woti --interval 30                            Launch with 30-minute navigation cells\n  \
+        woti --interval 15                            Launch with 15-minute navigation cells\n  \
         woti print                                    Print times to stdout\n  \
         woti print --time 15:00                       Print times pinned to a time\n  \
         woti print --date 2026-03-20 --time 19:00     Print times pinned to a date and time\n  \
@@ -32,6 +34,10 @@ pub struct Cli {
     /// Pin the TUI to a specific time (ISO 8601: HH:MM or HH:MM:SS)
     #[arg(long)]
     pub time: Option<String>,
+
+    /// Navigation interval in minutes for the TUI (60, 30, or 15). Session override; not persisted.
+    #[arg(long, value_parser = ["60", "30", "15"])]
+    pub interval: Option<String>,
 }
 
 #[derive(Subcommand)]
